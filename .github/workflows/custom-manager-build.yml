@@ -1,0 +1,87 @@
+name: Custom Morphe Manager - upstream sync and APK build
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Check the official stable branch every day at 03:00 UTC.
+    - cron: '0 3 * * *'
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'patcher-core/**'
+      - 'gradle/**'
+      - '.github/workflows/**'
+      - '*.gradle.kts'
+      - 'gradle.properties'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: custom-morphe-main-sync-build
+  cancel-in-progress: false
+
+jobs:
+  sync-upstream:
+    name: Sync official Morphe main into custom main
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.sync.outputs.changed }}
+    steps:
+      - name: Check out custom fork with full history
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Merge official upstream
+        id: sync
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/MorpheApp/morphe-manager.git
+          git fetch upstream main
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Custom branch already contains the latest official main."
+            exit 0
+          fi
+          if git merge --no-edit upstream/main; then
+            git push origin HEAD:main
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort || true
+            echo "::error::Upstream changes conflict with custom changes. No files were pushed and no APK will be published. Resolve the conflict in the custom fork, then rerun this workflow."
+            exit 1
+          fi
+
+  build-apk:
+    name: Build Community Catalog APK
+    needs: sync-upstream
+    if: needs.sync-upstream.outputs.changed == 'true' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out merged custom source
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Build debug APK
+        run: bash gradlew :app:assembleDebug --stacktrace
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: morphe-community-catalog-debug-${{ github.run_number }}
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30

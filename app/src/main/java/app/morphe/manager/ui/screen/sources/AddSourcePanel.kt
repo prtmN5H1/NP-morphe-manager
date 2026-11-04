@@ -6,6 +6,10 @@
 package app.morphe.manager.ui.screen.sources
 
 import android.net.Uri
+import android.webkit.JavascriptInterface
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.relocation.BringIntoViewRequester
@@ -31,11 +35,14 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.colorResource
 import app.morphe.manager.R
 import app.morphe.manager.domain.repository.PatchBundleRepository.LocalFileCheck
 import app.morphe.manager.domain.repository.PatchBundleRepository.RemoteSourceRejection
 import app.morphe.manager.domain.repository.PatchBundleRepository.RemoteUrlCheck
 import app.morphe.manager.ui.model.NewSourceOptions
+import app.morphe.manager.domain.manager.PreferencesManager
+import app.morphe.manager.util.COMMUNITY_PATCHES_URL
 import app.morphe.manager.ui.screen.shared.*
 import app.morphe.manager.ui.viewmodel.HomeViewModel.PickedBundle
 import app.morphe.manager.util.REMOTE_URL_PLACEHOLDER
@@ -69,10 +76,29 @@ fun AddSourcePanel(
     modifier: Modifier = Modifier
 ) {
     var showCommunityNotice by rememberSaveable { mutableStateOf(false) }
-    val openCommunityPatches = rememberOpenCommunityPatches(onNoticeNeeded = { showCommunityNotice = true })
+    var showCommunityCatalog by rememberSaveable { mutableStateOf(false) }
+    val prefs: PreferencesManager = koinInject()
+    val communityNoticeAcknowledged by prefs.communityNoticeAcknowledged.getAsState()
+    val openCommunityPatches = {
+        if (communityNoticeAcknowledged) showCommunityCatalog = true
+        else showCommunityNotice = true
+    }
 
     DialogHost(visible = showCommunityNotice) {
-        CommunityPatchesNoticeDialog(onDismiss = { showCommunityNotice = false })
+        ConfirmDialog(
+            title = stringResource(R.string.sources_dialog_community_notice_title),
+            message = stringResource(R.string.sources_dialog_community_notice_message),
+            primaryText = stringResource(R.string.open),
+            isPrimaryDestructive = false,
+            onDismiss = { showCommunityNotice = false },
+            onConfirm = {
+                showCommunityNotice = false
+                showCommunityCatalog = true
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    prefs.communityNoticeAcknowledged.update(true)
+                }
+            }
+        )
     }
 
     // Submitting clears the files, which would otherwise drop out of the panel as it slides away
@@ -85,7 +111,43 @@ fun AddSourcePanel(
         val remote = rememberRemoteLinksState(onCheckUrl)
         val readyCount = remote.readyLinks.size + files.count { it.adds }
 
-        Column(modifier = Modifier.padding(bottom = Defaults.SpaceSmall)) {
+        if (showCommunityCatalog) {
+            Column(modifier = Modifier.fillMaxWidth().heightIn(min = 520.dp).padding(bottom = Defaults.SpaceSmall)) {
+                PanelHeader(title = { PanelTitle(text = stringResource(R.string.sources_dialog_community)) }) {
+                    TitleAction(
+                        icon = MaterialSymbols.Rounded.Arrow_back,
+                        contentDescription = stringResource(android.R.string.cancel),
+                        onClick = { showCommunityCatalog = false },
+                        style = TitleActionStyle.Neutral
+                    )
+                    TitleAction(
+                        icon = MaterialSymbols.Rounded.Close,
+                        contentDescription = stringResource(R.string.close),
+                        onClick = onClose,
+                        style = TitleActionStyle.Neutral
+                    )
+                }
+                CommunityCatalogWebView(
+                    onAddSource = { url ->
+                        remote.addCommunitySource(url)
+                        showCommunityCatalog = false
+                    },
+                    isSourceAdded = { url ->
+                        when (val check = onCheckUrl(url)) {
+                            is RemoteUrlCheck.Rejected -> check.reason == RemoteSourceRejection.Duplicate
+                            is RemoteUrlCheck.Accepted -> false
+                        }
+                    },
+                    modifier = Modifier.weight(1f).fillMaxWidth()
+                )
+                Text(
+                    text = "Only add sources you trust. Community patches are third-party code.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = Defaults.SpaceLarge, vertical = Defaults.SpaceSmall)
+                )
+            }
+        } else Column(modifier = Modifier.padding(bottom = Defaults.SpaceSmall)) {
             PanelHeader(title = { PanelTitle(text = stringResource(R.string.sources_dialog_add_source)) }) {
                 // Where sources are found rather than a way of adding one, so it stays out of the actions
                 TitleAction(
@@ -268,6 +330,19 @@ private class RemoteLinksState(
 
     fun remove(link: String) {
         links = links - link
+    }
+
+    /** Adds a repository selected from the embedded community catalogue to the normal pending list. */
+    fun addCommunitySource(addSourceUrl: String): Boolean {
+        val normalizedLink = if (addSourceUrl.startsWith("intent://")) {
+            "https://" + addSourceUrl.removePrefix("intent://").substringBefore("#Intent;")
+        } else addSourceUrl
+        val uri = runCatching { Uri.parse(normalizedLink) }.getOrNull() ?: return false
+        if (uri.host != "morphe.software" || !uri.path.orEmpty().startsWith("/add-source")) return false
+        val repo = uri.getQueryParameter("github")?.let { "https://github.com/$it" }
+            ?: uri.getQueryParameter("gitlab")?.let { "https://gitlab.com/$it" }
+            ?: return false
+        return add(listOf(repo))
     }
 
     private fun add(newLinks: List<String>): Boolean {
@@ -496,4 +571,94 @@ private fun PendingSourceRow(
             tint = dialogSecondaryTextColor()
         )
     }
+}
+
+
+/**
+ * The official community catalogue embedded in the Add Source panel. The website remains the
+ * source of truth for catalogue content; add-source links are routed into Morphe's existing
+ * validation and pending-source flow rather than launching an external browser.
+ */
+@Composable
+private fun CommunityCatalogWebView(
+    onAddSource: (String) -> Unit,
+    isSourceAdded: (String) -> Boolean,
+    modifier: Modifier = Modifier
+) {
+    val currentAdd by rememberUpdatedState(onAddSource)
+    val currentIsAdded by rememberUpdatedState(isSourceAdded)
+    AndroidView(
+        modifier = modifier,
+        factory = { context ->
+            WebView(context).apply {
+                val catalogWebView = this
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.loadsImagesAutomatically = true
+                settings.javaScriptCanOpenWindowsAutomatically = false
+                addJavascriptInterface(object {
+                    @JavascriptInterface
+                    fun isAdded(url: String): Boolean = runCatching { currentIsAdded(url) }.getOrDefault(false)
+                    @JavascriptInterface
+                    fun addSource(url: String) {
+                        catalogWebView.post { currentAdd(url) }
+                    }
+                }, "MorpheCatalog")
+                webViewClient = object : WebViewClient() {
+                    override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
+                        if (url.startsWith("https://morphe.software/add-source")) {
+                            currentAdd(url)
+                            return true
+                        }
+                        // Keep catalogue browsing inside its own trusted website only.
+                        val host = runCatching { Uri.parse(url).host }.getOrNull()
+                        return host !in setOf("morphe-patches.software", "www.morphe-patches.software", "morphe.software", "www.morphe.software")
+                    }
+
+                    override fun onPageFinished(view: WebView, url: String) {
+                        super.onPageFinished(view, url)
+                        view.evaluateJavascript("""
+                            (function() {
+                              function sourceUrl(href) {
+                                try {
+                                  if (href.indexOf('intent://') === 0) href = 'https://' + href.substring(9).split('#Intent;')[0];
+                                  var u = new URL(href, location.href);
+                                  if (u.hostname !== 'morphe.software' || !u.pathname.startsWith('/add-source')) return null;
+                                  var owner = u.searchParams.get('github');
+                                  if (owner) return 'https://github.com/' + owner;
+                                  owner = u.searchParams.get('gitlab');
+                                  if (owner) return 'https://gitlab.com/' + owner;
+                                } catch(e) {}
+                                return null;
+                              }
+                              function decorate() {
+                                document.querySelectorAll('a[href]').forEach(function(a) {
+                                  var src = sourceUrl(a.href);
+                                  if (!src || a.dataset.morpheChecked) return;
+                                  a.dataset.morpheChecked = '1';
+                                  try {
+                                    if (MorpheCatalog.isAdded(src)) {
+                                      a.textContent = 'Already Added';
+                                      a.style.pointerEvents = 'none';
+                                      a.style.opacity = '0.65';
+                                      a.setAttribute('aria-disabled', 'true');
+                                    }
+                                  } catch(e) {}
+                                  a.addEventListener('click', function(ev) {
+                                    ev.preventDefault(); ev.stopPropagation();
+                                    try { MorpheCatalog.addSource(a.href); } catch(e) {}
+                                  }, true);
+                                });
+                              }
+                              decorate();
+                              new MutationObserver(decorate).observe(document.documentElement, {childList:true, subtree:true});
+                            })();
+                        """.trimIndent(), null)
+                    }
+                }
+                loadUrl("https://morphe-patches.software/")
+            }
+        },
+        update = { }
+    )
 }
