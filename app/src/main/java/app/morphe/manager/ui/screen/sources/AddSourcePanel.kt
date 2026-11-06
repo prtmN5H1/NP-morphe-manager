@@ -9,6 +9,8 @@ import android.net.Uri
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.WebChromeClient
+import android.view.View
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.*
@@ -77,6 +79,7 @@ fun AddSourcePanel(
 ) {
     var showCommunityNotice by rememberSaveable { mutableStateOf(false) }
     var showCommunityCatalog by rememberSaveable { mutableStateOf(false) }
+    var communityWebView by remember { mutableStateOf<WebView?>(null) }
     val prefs: PreferencesManager = koinInject()
     val communityNoticeAcknowledged by prefs.communityNoticeAcknowledged.getAsState()
     val openCommunityPatches = {
@@ -112,12 +115,20 @@ fun AddSourcePanel(
         val readyCount = remote.readyLinks.size + files.count { it.adds }
 
         if (showCommunityCatalog) {
-            Column(modifier = Modifier.fillMaxWidth().heightIn(min = 520.dp).padding(bottom = Defaults.SpaceSmall)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight()
+                    .padding(bottom = Defaults.SpaceSmall)
+            ) {
                 PanelHeader(title = { PanelTitle(text = stringResource(R.string.sources_dialog_community)) }) {
                     TitleAction(
                         icon = MaterialSymbols.Rounded.Arrow_back,
                         contentDescription = stringResource(android.R.string.cancel),
-                        onClick = { showCommunityCatalog = false },
+                        onClick = {
+                            if (communityWebView?.canGoBack() == true) communityWebView?.goBack()
+                            else showCommunityCatalog = false
+                        },
                         style = TitleActionStyle.Neutral
                     )
                     TitleAction(
@@ -128,17 +139,62 @@ fun AddSourcePanel(
                     )
                 }
                 CommunityCatalogWebView(
-                    onAddSource = { url ->
-                        remote.addCommunitySource(url)
-                        showCommunityCatalog = false
-                    },
+                    onAddSource = { url -> remote.addCommunitySource(url) },
                     isSourceAdded = { url ->
                         when (val check = onCheckUrl(url)) {
                             is RemoteUrlCheck.Rejected -> check.reason == RemoteSourceRejection.Duplicate
                             is RemoteUrlCheck.Accepted -> false
                         }
                     },
-                    modifier = Modifier.weight(1f).fillMaxWidth()
+                    isSourceQueued = { url ->
+                        remote.readyLinks.any { it.trimEnd('/').equals(url.trimEnd('/'), ignoreCase = true) }
+                    },
+                    onWebViewCreated = { communityWebView = it },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        
+                )
+                if (remote.readyLinks.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .padding(horizontal = Defaults.SpaceLarge)
+                            .heightIn(max = 132.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        PendingSources(
+                            state = remote,
+                            files = emptyList(),
+                            onRemoveFile = {},
+                        )
+                    }
+                    NewSourceOptionsGroup(
+                        options = options,
+                        onOptionsChange = { options = it },
+                        offersChooseApps = true,
+                        offersPrerelease = remote.offersPrerelease,
+                        modifier = Modifier.padding(horizontal = Defaults.SpaceLarge)
+                    )
+                }
+                Text(
+                    text = if (remote.readyLinks.isEmpty()) {
+                        "Select one or more sources. They will stay queued while you browse."
+                    } else {
+                        "${remote.readyLinks.size} source(s) selected. You can keep browsing or add them together."
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = Defaults.SpaceLarge, vertical = Defaults.SpaceSmall)
+                )
+                AppDialogButtonRow(
+                    primaryText = if (remote.readyLinks.size > 1) {
+                        pluralStringResource(R.plurals.sources_dialog_add_count, remote.readyLinks.size, remote.readyLinks.size.toString())
+                    } else {
+                        stringResource(R.string.add)
+                    },
+                    onPrimaryClick = { onSubmit(remote.readyLinks, options) },
+                    primaryEnabled = remote.readyLinks.isNotEmpty(),
+                    modifier = Modifier.padding(horizontal = Defaults.SpaceLarge)
                 )
                 Text(
                     text = "Only add sources you trust. Community patches are third-party code.",
@@ -342,6 +398,8 @@ private class RemoteLinksState(
         val repo = uri.getQueryParameter("github")?.let { "https://github.com/$it" }
             ?: uri.getQueryParameter("gitlab")?.let { "https://gitlab.com/$it" }
             ?: return false
+        // Do not queue an already-added, blocked, or malformed source from the catalogue.
+        if (check(repo) !is RemoteUrlCheck.Accepted) return false
         return add(listOf(repo))
     }
 
@@ -581,84 +639,186 @@ private fun PendingSourceRow(
  */
 @Composable
 private fun CommunityCatalogWebView(
-    onAddSource: (String) -> Unit,
+    onAddSource: (String) -> Boolean,
     isSourceAdded: (String) -> Boolean,
+    isSourceQueued: (String) -> Boolean,
+    onWebViewCreated: (WebView) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val currentAdd by rememberUpdatedState(onAddSource)
     val currentIsAdded by rememberUpdatedState(isSourceAdded)
+    val currentIsQueued by rememberUpdatedState(isSourceQueued)
+    val currentOnWebViewCreated by rememberUpdatedState(onWebViewCreated)
     AndroidView(
         modifier = modifier,
         factory = { context ->
             WebView(context).apply {
                 val catalogWebView = this
+                currentOnWebViewCreated(this)
+                overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+                setOnTouchListener { view, event ->
+                    when (event.actionMasked) {
+                        android.view.MotionEvent.ACTION_DOWN,
+                        android.view.MotionEvent.ACTION_MOVE ->
+                            view.parent?.requestDisallowInterceptTouchEvent(true)
+                        android.view.MotionEvent.ACTION_UP,
+                        android.view.MotionEvent.ACTION_CANCEL ->
+                            view.parent?.requestDisallowInterceptTouchEvent(false)
+                    }
+                    false
+                }
+
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.loadsImagesAutomatically = true
                 settings.javaScriptCanOpenWindowsAutomatically = false
+                settings.setSupportMultipleWindows(false)
+                settings.allowFileAccess = false
+                settings.allowContentAccess = false
+                settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+
                 addJavascriptInterface(object {
                     @JavascriptInterface
-                    fun isAdded(url: String): Boolean = runCatching { currentIsAdded(url) }.getOrDefault(false)
+                    fun isAdded(url: String): Boolean =
+                        runCatching { currentIsAdded(url) }.getOrDefault(false)
+
                     @JavascriptInterface
-                    fun addSource(url: String) {
-                        catalogWebView.post { currentAdd(url) }
+                    fun isQueued(url: String): Boolean =
+                        runCatching { currentIsQueued(url) }.getOrDefault(false)
+
+                    @JavascriptInterface
+                    fun addSource(url: String): Boolean {
+                        var accepted = false
+                        val latch = java.util.concurrent.CountDownLatch(1)
+                        catalogWebView.post {
+                            accepted = runCatching { currentAdd(url) }.getOrDefault(false)
+                            latch.countDown()
+                        }
+                        runCatching { latch.await(2, java.util.concurrent.TimeUnit.SECONDS) }
+                        return accepted
                     }
                 }, "MorpheCatalog")
+
                 webViewClient = object : WebViewClient() {
-                    override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
+                    private fun handleNavigation(url: String): Boolean {
+                        if (url.startsWith("intent://")) {
+                            val httpsUrl = "https://" + url.removePrefix("intent://").substringBefore("#Intent;")
+                            if (httpsUrl.startsWith("https://morphe.software/add-source")) {
+                                currentAdd(httpsUrl)
+                                return true
+                            }
+                        }
                         if (url.startsWith("https://morphe.software/add-source")) {
                             currentAdd(url)
                             return true
                         }
-                        // Keep catalogue browsing inside its own trusted website only.
-                        val host = runCatching { Uri.parse(url).host }.getOrNull()
-                        return host !in setOf("morphe-patches.software", "www.morphe-patches.software", "morphe.software", "www.morphe.software")
+                        val host = runCatching { Uri.parse(url).host?.lowercase(Locale.US) }.getOrNull()
+                        // All catalogue pages and their future routes stay inside this WebView.
+                        return host !in setOf("morphe-patches.software", "www.morphe-patches.software")
                     }
+
+                    override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean =
+                        handleNavigation(url)
+
+                    override fun shouldOverrideUrlLoading(
+                        view: WebView,
+                        request: android.webkit.WebResourceRequest
+                    ): Boolean = handleNavigation(request.url.toString())
 
                     override fun onPageFinished(view: WebView, url: String) {
                         super.onPageFinished(view, url)
                         view.evaluateJavascript("""
                             (function() {
+                              if (window.__morpheCatalogObserver) {
+                                try { window.__morpheCatalogObserver.disconnect(); } catch(e) {}
+                              }
                               function sourceUrl(href) {
                                 try {
                                   if (href.indexOf('intent://') === 0) href = 'https://' + href.substring(9).split('#Intent;')[0];
                                   var u = new URL(href, location.href);
                                   if (u.hostname !== 'morphe.software' || !u.pathname.startsWith('/add-source')) return null;
                                   var owner = u.searchParams.get('github');
-                                  if (owner) return 'https://github.com/' + owner;
+                                  if (owner) return 'https://github.com/' + owner.replace(/^\/+|\/+$/g, '');
                                   owner = u.searchParams.get('gitlab');
-                                  if (owner) return 'https://gitlab.com/' + owner;
+                                  if (owner) return 'https://github.com/' + owner.replace(/^\/+|\/+$/g, '');
                                 } catch(e) {}
                                 return null;
                               }
                               function decorate() {
                                 document.querySelectorAll('a[href]').forEach(function(a) {
                                   var src = sourceUrl(a.href);
-                                  if (!src || a.dataset.morpheChecked) return;
-                                  a.dataset.morpheChecked = '1';
-                                  try {
-                                    if (MorpheCatalog.isAdded(src)) {
-                                      a.textContent = 'Already Added';
-                                      a.style.pointerEvents = 'none';
-                                      a.style.opacity = '0.65';
-                                      a.setAttribute('aria-disabled', 'true');
+                                  if (!src) {
+                                    try {
+                                      var u = new URL(a.href, location.href);
+                                      if (u.hostname === location.hostname) a.target = '_self';
+                                    } catch(e) {}
+                                    return;
+                                  }
+                                  a.target = '_self';
+                                  if (a.dataset.morpheOriginalText === undefined) a.dataset.morpheOriginalText = a.textContent;
+                                  var added = false, queued = false;
+                                  try { added = MorpheCatalog.isAdded(src); } catch(e) {}
+                                  try { queued = MorpheCatalog.isQueued(src); } catch(e) {}
+                                  if (added) {
+                                    a.textContent = 'Already Added';
+                                    a.style.pointerEvents = 'none';
+                                    a.style.opacity = '0.65';
+                                    a.setAttribute('aria-disabled', 'true');
+                                    a.dataset.morpheStatus = 'added';
+                                  } else if (queued) {
+                                    a.textContent = 'Queued ✓';
+                                    a.style.pointerEvents = 'none';
+                                    a.style.opacity = '0.85';
+                                    a.setAttribute('aria-disabled', 'true');
+                                    a.dataset.morpheStatus = 'queued';
+                                  } else {
+                                    if (a.dataset.morpheStatus === 'queued') {
+                                      a.textContent = a.dataset.morpheOriginalText || 'Add';
+                                      a.style.pointerEvents = '';
+                                      a.style.opacity = '';
+                                      a.removeAttribute('aria-disabled');
+                                      delete a.dataset.morpheStatus;
                                     }
-                                  } catch(e) {}
-                                  a.addEventListener('click', function(ev) {
-                                    ev.preventDefault(); ev.stopPropagation();
-                                    try { MorpheCatalog.addSource(a.href); } catch(e) {}
-                                  }, true);
+                                    if (!a.dataset.morpheClickBound) {
+                                      a.dataset.morpheClickBound = '1';
+                                    a.addEventListener('click', function(ev) {
+                                      ev.preventDefault(); ev.stopPropagation();
+                                      var ok = false;
+                                      try { ok = MorpheCatalog.addSource(a.href); } catch(e) {}
+                                      if (ok) {
+                                        a.textContent = 'Queued ✓';
+                                        a.style.pointerEvents = 'none';
+                                        a.style.opacity = '0.85';
+                                        a.setAttribute('aria-disabled', 'true');
+                                        a.dataset.morpheStatus = 'queued';
+                                      }
+                                    }, true);
+                                    }
+                                  }
                                 });
                               }
+                              window.__morpheCatalogDecorate = decorate;
                               decorate();
-                              new MutationObserver(decorate).observe(document.documentElement, {childList:true, subtree:true});
+                              window.__morpheCatalogObserver = new MutationObserver(decorate);
+                              window.__morpheCatalogObserver.observe(document.documentElement, {childList:true, subtree:true, attributes:true, attributeFilter:['href']});
                             })();
                         """.trimIndent(), null)
                     }
                 }
+                webChromeClient = object : WebChromeClient() {
+                    override fun onCreateWindow(
+                        view: WebView,
+                        isDialog: Boolean,
+                        isUserGesture: Boolean,
+                        resultMsg: android.os.Message
+                    ): Boolean = false
+                }
                 loadUrl("https://morphe-patches.software/")
             }
         },
-        update = { }
+        update = { view ->
+            // Re-check visible Add controls when the native queue changes (including removals).
+            view.evaluateJavascript("window.__morpheCatalogDecorate && window.__morpheCatalogDecorate();", null)
+        }
     )
 }
