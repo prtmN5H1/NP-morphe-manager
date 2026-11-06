@@ -394,7 +394,7 @@ private class RemoteLinksState(
             "https://" + addSourceUrl.removePrefix("intent://").substringBefore("#Intent;")
         } else addSourceUrl
         val uri = runCatching { Uri.parse(normalizedLink) }.getOrNull() ?: return false
-        if (uri.host != "morphe.software" || !uri.path.orEmpty().startsWith("/add-source")) return false
+        if (!uri.host.equals("morphe.software", ignoreCase = true) || uri.path != "/add-source") return false
         val repo = uri.getQueryParameter("github")?.let { "https://github.com/$it" }
             ?: uri.getQueryParameter("gitlab")?.let { "https://gitlab.com/$it" }
             ?: return false
@@ -740,9 +740,16 @@ private fun CommunityCatalogWebView(
                                   var owner = u.searchParams.get('github');
                                   if (owner) return 'https://github.com/' + owner.replace(/^\/+|\/+$/g, '');
                                   owner = u.searchParams.get('gitlab');
-                                  if (owner) return 'https://github.com/' + owner.replace(/^\/+|\/+$/g, '');
+                                  if (owner) return 'https://gitlab.com/' + owner.replace(/^\/+|\/+$/g, '');
                                 } catch(e) {}
                                 return null;
+                              }
+                              var statusCache = Object.create(null);
+                              var decorateQueued = false;
+                              function setLabel(a, value) {
+                                // Assigning textContent unconditionally creates a new text node. The
+                                // observer watches childList, so doing that on every pass loops forever.
+                                if (a.textContent !== value) a.textContent = value;
                               }
                               function decorate() {
                                 document.querySelectorAll('a[href]').forEach(function(a) {
@@ -756,24 +763,28 @@ private fun CommunityCatalogWebView(
                                   }
                                   a.target = '_self';
                                   if (a.dataset.morpheOriginalText === undefined) a.dataset.morpheOriginalText = a.textContent;
-                                  var added = false, queued = false;
-                                  try { added = MorpheCatalog.isAdded(src); } catch(e) {}
-                                  try { queued = MorpheCatalog.isQueued(src); } catch(e) {}
-                                  if (added) {
-                                    a.textContent = 'Already Added';
+                                  var status = statusCache[src];
+                                  if (!status) {
+                                    var added = false, queued = false;
+                                    try { added = MorpheCatalog.isAdded(src); } catch(e) {}
+                                    try { queued = MorpheCatalog.isQueued(src); } catch(e) {}
+                                    status = statusCache[src] = added ? 'added' : (queued ? 'queued' : 'new');
+                                  }
+                                  if (status === 'added') {
+                                    setLabel(a, 'Already Added');
                                     a.style.pointerEvents = 'none';
                                     a.style.opacity = '0.65';
                                     a.setAttribute('aria-disabled', 'true');
                                     a.dataset.morpheStatus = 'added';
-                                  } else if (queued) {
-                                    a.textContent = 'Queued ✓';
+                                  } else if (status === 'queued') {
+                                    setLabel(a, 'Queued ✓');
                                     a.style.pointerEvents = 'none';
                                     a.style.opacity = '0.85';
                                     a.setAttribute('aria-disabled', 'true');
                                     a.dataset.morpheStatus = 'queued';
                                   } else {
-                                    if (a.dataset.morpheStatus === 'queued') {
-                                      a.textContent = a.dataset.morpheOriginalText || 'Add';
+                                    if (a.dataset.morpheStatus === 'queued' || a.dataset.morpheStatus === 'added') {
+                                      setLabel(a, a.dataset.morpheOriginalText || 'Add');
                                       a.style.pointerEvents = '';
                                       a.style.opacity = '';
                                       a.removeAttribute('aria-disabled');
@@ -781,31 +792,52 @@ private fun CommunityCatalogWebView(
                                     }
                                     if (!a.dataset.morpheClickBound) {
                                       a.dataset.morpheClickBound = '1';
-                                    a.addEventListener('click', function(ev) {
-                                      ev.preventDefault(); ev.stopPropagation();
-                                      var ok = false;
-                                      try { ok = MorpheCatalog.addSource(a.href); } catch(e) {}
-                                      if (ok) {
-                                        a.textContent = 'Queued ✓';
-                                        a.style.pointerEvents = 'none';
-                                        a.style.opacity = '0.85';
-                                        a.setAttribute('aria-disabled', 'true');
-                                        a.dataset.morpheStatus = 'queued';
-                                      }
-                                    }, true);
+                                      a.addEventListener('click', function(ev) {
+                                        ev.preventDefault(); ev.stopPropagation();
+                                        var ok = false;
+                                        try { ok = MorpheCatalog.addSource(a.href); } catch(e) {}
+                                        if (ok) {
+                                          statusCache[src] = 'queued';
+                                          setLabel(a, 'Queued ✓');
+                                          a.style.pointerEvents = 'none';
+                                          a.style.opacity = '0.85';
+                                          a.setAttribute('aria-disabled', 'true');
+                                          a.dataset.morpheStatus = 'queued';
+                                        }
+                                      }, true);
                                     }
                                   }
                                 });
                               }
-                              window.__morpheCatalogDecorate = decorate;
+                              function scheduleDecorate() {
+                                if (decorateQueued) return;
+                                decorateQueued = true;
+                                requestAnimationFrame(function() {
+                                  decorateQueued = false;
+                                  decorate();
+                                });
+                              }
+                              window.__morpheCatalogDecorate = scheduleDecorate;
+                              window.__morpheCatalogRefresh = function() {
+                                statusCache = Object.create(null);
+                                scheduleDecorate();
+                              };
                               decorate();
-                              window.__morpheCatalogObserver = new MutationObserver(decorate);
+                              window.__morpheCatalogObserver = new MutationObserver(scheduleDecorate);
                               window.__morpheCatalogObserver.observe(document.documentElement, {childList:true, subtree:true, attributes:true, attributeFilter:['href']});
                             })();
                         """.trimIndent(), null)
                     }
                 }
                 webChromeClient = object : WebChromeClient() {
+                    override fun onConsoleMessage(message: android.webkit.ConsoleMessage): Boolean {
+                        android.util.Log.d(
+                            "MorpheCommunityWeb",
+                            "${message.message()} (${message.sourceId()}:${message.lineNumber()})"
+                        )
+                        return true
+                    }
+
                     override fun onCreateWindow(
                         view: WebView,
                         isDialog: Boolean,
@@ -818,7 +850,7 @@ private fun CommunityCatalogWebView(
         },
         update = { view ->
             // Re-check visible Add controls when the native queue changes (including removals).
-            view.evaluateJavascript("window.__morpheCatalogDecorate && window.__morpheCatalogDecorate();", null)
+            view.evaluateJavascript("window.__morpheCatalogRefresh && window.__morpheCatalogRefresh();", null)
         }
     )
 }
