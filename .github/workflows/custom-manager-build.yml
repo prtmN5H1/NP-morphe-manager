@@ -17,6 +17,7 @@ on:
 
 permissions:
   contents: write
+  packages: read
 
 concurrency:
   group: custom-morphe-main-sync-build
@@ -87,6 +88,10 @@ jobs:
           packages: 'platform-tools'
 
       - name: Build debug APK
+        env:
+          # The MorpheApp GitHub Maven registry requires authenticated package access.
+          # Prefer an optional PAT secret; otherwise use this repository's GITHUB_TOKEN.
+          GITHUB_TOKEN: ${{ secrets.MORPHE_GPR_TOKEN || secrets.GITHUB_TOKEN }}
         run: bash gradlew :app:assembleDebug --stacktrace
 
       - name: Upload APK artifact
