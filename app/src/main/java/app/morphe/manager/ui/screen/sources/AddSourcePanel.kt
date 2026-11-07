@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -39,10 +40,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.colorResource
 import app.morphe.manager.R
+import app.morphe.manager.domain.repository.PatchBundleRepository
 import app.morphe.manager.domain.repository.PatchBundleRepository.LocalFileCheck
 import app.morphe.manager.domain.repository.PatchBundleRepository.RemoteSourceRejection
 import app.morphe.manager.domain.repository.PatchBundleRepository.RemoteUrlCheck
+import app.morphe.manager.domain.repository.SourceMuteRepository
 import app.morphe.manager.ui.model.NewSourceOptions
+import app.morphe.manager.ui.model.SourceAddRequest
+import app.morphe.manager.ui.model.SourceScope
 import app.morphe.manager.domain.manager.PreferencesManager
 import app.morphe.manager.util.COMMUNITY_PATCHES_URL
 import app.morphe.manager.ui.screen.shared.*
@@ -70,7 +75,7 @@ import java.util.Locale
 fun AddSourcePanel(
     visible: Boolean,
     onClose: () -> Unit,
-    onSubmit: (urls: List<String>, options: NewSourceOptions) -> Unit,
+    onSubmit: (requests: List<SourceAddRequest>, options: NewSourceOptions) -> Unit,
     onPickFiles: () -> Unit,
     onRemoveFile: (Uri) -> Unit,
     localFiles: List<PickedBundle>,
@@ -81,6 +86,9 @@ fun AddSourcePanel(
     var showCommunityCatalog by rememberSaveable { mutableStateOf(false) }
     var communityWebView by remember { mutableStateOf<WebView?>(null) }
     val prefs: PreferencesManager = koinInject()
+    val patchBundleRepository: PatchBundleRepository = koinInject()
+    val sourceMuteRepository: SourceMuteRepository = koinInject()
+    val mutedBySource by sourceMuteRepository.mutedSources.collectAsStateWithLifecycle(emptyMap())
     val communityNoticeAcknowledged by prefs.communityNoticeAcknowledged.getAsState()
     val openCommunityPatches = {
         if (communityNoticeAcknowledged) showCommunityCatalog = true
@@ -110,7 +118,10 @@ fun AddSourcePanel(
     DockedPanel(visible = visible, onBack = onClose, modifier = modifier) {
         // Composed only while the panel is up, so the links typed and the choices made start over
         // each time it opens
-        var options by rememberSaveable { mutableStateOf(NewSourceOptions()) }
+        val defaultExperimentalAppVersions by prefs.defaultExperimentalAppVersions.getAsState()
+        var options by rememberSaveable {
+            mutableStateOf(NewSourceOptions(useExperimentalVersions = defaultExperimentalAppVersions))
+        }
         val remote = rememberRemoteLinksState(onCheckUrl)
         val readyCount = remote.readyLinks.size + files.count { it.adds }
 
@@ -140,10 +151,21 @@ fun AddSourcePanel(
                 }
                 CommunityCatalogWebView(
                     onAddSource = { url -> remote.addCommunitySource(url) },
-                    isSourceAdded = { url ->
-                        when (val check = onCheckUrl(url)) {
-                            is RemoteUrlCheck.Rejected -> check.reason == RemoteSourceRejection.Duplicate
-                            is RemoteUrlCheck.Accepted -> false
+                    isSourceAdded = { addUrl ->
+                        val addUri = runCatching { Uri.parse(addUrl) }.getOrNull()
+                        val sourceUrl = addUri?.getQueryParameter("github")?.let { "https://github.com/$it" }
+                            ?: addUri?.getQueryParameter("gitlab")?.let { "https://gitlab.com/$it" }
+                            ?: addUrl
+                        val appPackage = addUri?.getQueryParameter("app")
+                            ?.takeIf { it.isNotBlank() && it != "__universal__" }
+                        if (appPackage != null) {
+                            val uid = patchBundleRepository.existingSourceUid(sourceUrl)
+                            uid != null && uid !in mutedBySource[appPackage].orEmpty()
+                        } else {
+                            when (val check = onCheckUrl(sourceUrl)) {
+                                is RemoteUrlCheck.Rejected -> check.reason == RemoteSourceRejection.Duplicate
+                                is RemoteUrlCheck.Accepted -> false
+                            }
                         }
                     },
                     isSourceQueued = { url ->
@@ -171,8 +193,9 @@ fun AddSourcePanel(
                     NewSourceOptionsGroup(
                         options = options,
                         onOptionsChange = { options = it },
-                        offersChooseApps = true,
+                        offersChooseApps = remote.offersChooseApps,
                         offersPrerelease = remote.offersPrerelease,
+                        offersExperimentalVersions = true,
                         modifier = Modifier.padding(horizontal = Defaults.SpaceLarge)
                     )
                 }
@@ -192,7 +215,7 @@ fun AddSourcePanel(
                     } else {
                         stringResource(R.string.add)
                     },
-                    onPrimaryClick = { onSubmit(remote.readyLinks, options) },
+                    onPrimaryClick = { onSubmit(remote.readyRequests, options) },
                     primaryEnabled = remote.readyLinks.isNotEmpty(),
                     modifier = Modifier.padding(horizontal = Defaults.SpaceLarge)
                 )
@@ -247,7 +270,8 @@ fun AddSourcePanel(
                     options = options,
                     onOptionsChange = { options = it },
                     offersChooseApps = true,
-                    offersPrerelease = remote.offersPrerelease
+                    offersPrerelease = remote.offersPrerelease,
+                    offersExperimentalVersions = remote.readyLinks.isNotEmpty()
                 )
             }
             Box(modifier = Modifier.padding(horizontal = Defaults.SpaceLarge)) {
@@ -257,7 +281,7 @@ fun AddSourcePanel(
                     } else {
                         stringResource(R.string.add)
                     },
-                    onPrimaryClick = { onSubmit(remote.readyLinks, options) },
+                    onPrimaryClick = { onSubmit(remote.readyRequests, options) },
                     primaryEnabled = readyCount > 0
                 )
             }
@@ -266,9 +290,8 @@ fun AddSourcePanel(
 }
 
 /**
- * The switches a source is added with, as one group: whether its app list opens once it has loaded,
- * and whether it starts on prerelease. Each row shows only where its choice applies, and the group
- * nothing where none does.
+ * The switches applied to a newly added source batch: app selection, prerelease channel and
+ * experimental app targets. A row is shown only when it applies to the current selection.
  */
 @Composable
 internal fun NewSourceOptionsGroup(
@@ -276,9 +299,10 @@ internal fun NewSourceOptionsGroup(
     onOptionsChange: (NewSourceOptions) -> Unit,
     offersChooseApps: Boolean,
     offersPrerelease: Boolean,
+    offersExperimentalVersions: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    if (!offersChooseApps && !offersPrerelease) return
+    if (!offersChooseApps && !offersPrerelease && !offersExperimentalVersions) return
 
     // Spaced by each row rather than by the column, so a row folding in brings its gap along
     Column(modifier = modifier) {
@@ -300,6 +324,16 @@ internal fun NewSourceOptionsGroup(
                 checked = options.usePrerelease,
                 onCheckedChange = { onOptionsChange(options.copy(usePrerelease = it)) },
                 modifier = Modifier.padding(top = if (offersChooseApps) Defaults.SpaceSmall else 0.dp),
+                showDivider = false
+            )
+        }
+        ListRowFold(visible = offersExperimentalVersions) {
+            ToggleRow(
+                title = stringResource(R.string.sources_management_experimental_versions_toggle),
+                description = stringResource(R.string.sources_management_experimental_versions_toggle_description),
+                checked = options.useExperimentalVersions,
+                onCheckedChange = { onOptionsChange(options.copy(useExperimentalVersions = it)) },
+                modifier = Modifier.padding(top = Defaults.SpaceSmall),
                 showDivider = false
             )
         }
@@ -336,10 +370,22 @@ private class RemoteLinksState(
     inputState: MutableState<String>
 ) {
     private var links by linksState
+    private var communityScopes by mutableStateOf<Map<String, SourceScope>>(emptyMap())
     var input by inputState
         private set
 
-    val entries by derivedStateOf { links.map { RemoteLinkEntry(it, check(it)) } }
+    private fun checkEntry(link: String): RemoteUrlCheck {
+        val result = check(link)
+        // An app-scoped Community Catalog link can intentionally target an app that was left out
+        // of an already-added source. Keep that request addable so Native flow can unmute the app.
+        if (result is RemoteUrlCheck.Rejected && result.reason == RemoteSourceRejection.Duplicate) {
+            val key = link.lowercase(Locale.US)
+            if (communityScopes[key] is SourceScope.App) return RemoteUrlCheck.Accepted(link)
+        }
+        return result
+    }
+
+    val entries by derivedStateOf { links.map { RemoteLinkEntry(it, checkEntry(it)) } }
 
     /** Links in the field. Text that holds none is still checked, to say why it is not one. */
     private val inputEntries by derivedStateOf {
@@ -361,6 +407,16 @@ private class RemoteLinksState(
 
     /** Links that will become sources, the ones in the field included. */
     val readyLinks by derivedStateOf { readyEntries.map { it.link } }
+
+    /** Source requests preserve app/universal scope from the Community Catalog's Add links. */
+    val readyRequests by derivedStateOf {
+        readyEntries.map { entry ->
+            SourceAddRequest(entry.link, communityScopes[entry.key] ?: SourceScope.Whole)
+        }
+    }
+
+    /** Whether the batch contains a whole-source request that can offer app selection. */
+    val offersChooseApps by derivedStateOf { readyRequests.any { it.scope == SourceScope.Whole } }
 
     /** Whether any of [readyLinks] could start on prerelease. */
     val offersPrerelease by derivedStateOf {
@@ -385,7 +441,9 @@ private class RemoteLinksState(
     fun paste(text: String): Boolean = add(extractLinks(text))
 
     fun remove(link: String) {
+        val key = RemoteLinkEntry(link, check(link)).key
         links = links - link
+        communityScopes = communityScopes - key
     }
 
     /** Adds a repository selected from the embedded community catalogue to the normal pending list. */
@@ -394,19 +452,38 @@ private class RemoteLinksState(
             "https://" + addSourceUrl.removePrefix("intent://").substringBefore("#Intent;")
         } else addSourceUrl
         val uri = runCatching { Uri.parse(normalizedLink) }.getOrNull() ?: return false
-        if (!uri.host.equals("morphe.software", ignoreCase = true) || uri.path != "/add-source") return false
+        if (uri.host?.lowercase(Locale.US) !in setOf("morphe-patches.software", "www.morphe-patches.software", "morphe.software", "www.morphe.software") ||
+            !uri.path.orEmpty().startsWith("/add-source")
+        ) return false
         val repo = uri.getQueryParameter("github")?.let { "https://github.com/$it" }
             ?: uri.getQueryParameter("gitlab")?.let { "https://gitlab.com/$it" }
             ?: return false
-        // Do not queue an already-added, blocked, or malformed source from the catalogue.
-        if (check(repo) !is RemoteUrlCheck.Accepted) return false
-        return add(listOf(repo))
+        // Preserve the exact scope from the Community Catalog URL. A duplicate whole-source URL
+        // is rejected, but an app-scoped URL may be used to bring a previously left-out app back.
+        val scope = SourceScope.fromLink(
+            app = uri.getQueryParameter("app"),
+            appName = uri.getQueryParameter("appName")
+        )
+        val result = check(repo)
+        val accepted = result as? RemoteUrlCheck.Accepted
+        val duplicateAppScope = result is RemoteUrlCheck.Rejected &&
+                result.reason == RemoteSourceRejection.Duplicate && scope is SourceScope.App
+        if (accepted == null && !duplicateAppScope) return false
+        val key = accepted?.let { RemoteLinkEntry(repo, it).key } ?: repo.lowercase(Locale.US)
+        val alreadyQueued = entries.any { it.key == key }
+        if (!alreadyQueued && add(listOf(repo))) {
+            communityScopes = communityScopes + (key to scope)
+        } else if (alreadyQueued && scope == SourceScope.Whole) {
+            // A whole-source request is broader; preserve it if the user taps a later link.
+            communityScopes = communityScopes + (key to SourceScope.Whole)
+        }
+        return alreadyQueued || entries.any { it.key == key }
     }
 
     private fun add(newLinks: List<String>): Boolean {
         if (newLinks.isEmpty()) return false
         val taken = entries.mapTo(mutableSetOf()) { it.key }
-        links = links + newLinks.filter { taken.add(RemoteLinkEntry(it, check(it)).key) }
+        links = links + newLinks.filter { taken.add(RemoteLinkEntry(it, checkEntry(it)).key) }
         return true
     }
 }
@@ -703,12 +780,18 @@ private fun CommunityCatalogWebView(
                     private fun handleNavigation(url: String): Boolean {
                         if (url.startsWith("intent://")) {
                             val httpsUrl = "https://" + url.removePrefix("intent://").substringBefore("#Intent;")
-                            if (httpsUrl.startsWith("https://morphe.software/add-source")) {
+                            val intentUri = runCatching { Uri.parse(httpsUrl) }.getOrNull()
+                            if (intentUri?.host?.lowercase(Locale.US) in setOf("morphe-patches.software", "www.morphe-patches.software", "morphe.software", "www.morphe.software") &&
+                                intentUri.path.orEmpty().startsWith("/add-source")
+                            ) {
                                 currentAdd(httpsUrl)
                                 return true
                             }
                         }
-                        if (url.startsWith("https://morphe.software/add-source")) {
+                        val navigationUri = runCatching { Uri.parse(url) }.getOrNull()
+                        if (navigationUri?.host?.lowercase(Locale.US) in setOf("morphe-patches.software", "www.morphe-patches.software", "morphe.software", "www.morphe.software") &&
+                            navigationUri.path.orEmpty().startsWith("/add-source")
+                        ) {
                             currentAdd(url)
                             return true
                         }
@@ -736,7 +819,7 @@ private fun CommunityCatalogWebView(
                                 try {
                                   if (href.indexOf('intent://') === 0) href = 'https://' + href.substring(9).split('#Intent;')[0];
                                   var u = new URL(href, location.href);
-                                  if (u.hostname !== 'morphe.software' || !u.pathname.startsWith('/add-source')) return null;
+                                  if ((['morphe-patches.software', 'www.morphe-patches.software', 'morphe.software', 'www.morphe.software'].indexOf(u.hostname) === -1) || !u.pathname.startsWith('/add-source')) return null;
                                   var owner = u.searchParams.get('github');
                                   if (owner) return 'https://github.com/' + owner.replace(/^\/+|\/+$/g, '');
                                   owner = u.searchParams.get('gitlab');
@@ -766,7 +849,7 @@ private fun CommunityCatalogWebView(
                                   var status = statusCache[src];
                                   if (!status) {
                                     var added = false, queued = false;
-                                    try { added = MorpheCatalog.isAdded(src); } catch(e) {}
+                                    try { added = MorpheCatalog.isAdded(a.href); } catch(e) {}
                                     try { queued = MorpheCatalog.isQueued(src); } catch(e) {}
                                     status = statusCache[src] = added ? 'added' : (queued ? 'queued' : 'new');
                                   }

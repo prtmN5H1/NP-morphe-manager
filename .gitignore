@@ -133,3 +133,8 @@ local.properties
 AGENT.md
 .gitignore
 to-do.txt
+
+# Custom manager signing material (never commit)
+app/keystore.jks
+KEYSTORE_B64.txt
+CUSTOM_RELEASE_PASSWORDS.txt

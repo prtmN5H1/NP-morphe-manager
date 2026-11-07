@@ -81,7 +81,7 @@ class PostPatchPrompts(
                     useManagerPrereleases = useManagerPrereleases,
                     usePatchesPrereleases = usePatchesPrereleases
                 )
-                if (!hasGms) UpdateCheckWorker.schedule(app, prefs.updateCheckInterval.get())
+                UpdateCheckWorker.schedule(app, prefs.updateCheckInterval.get())
             }
         }
         _notification.value = false

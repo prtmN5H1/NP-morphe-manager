@@ -107,6 +107,9 @@ class PreferencesManager(
     /** UIDs of bundles for which experimental app versions are preferred as the recommended target. */
     val bundleExperimentalVersionsEnabled = stringSetPreference("bundle_experimental_versions_enabled", emptySet())
 
+    /** Default for new remote sources that support prerelease and experimental app targets. */
+    val defaultExperimentalAppVersions = booleanPreference("default_experimental_app_versions", false)
+
     /** Packages whose experimental version warning was confirmed, which is asked once per app. */
     val experimentalVersionsConfirmed = stringSetPreference("experimental_versions_confirmed", emptySet())
 
@@ -343,6 +346,7 @@ class PreferencesManager(
         val keystorePassword: String? = null,
         val firstLaunch: Boolean? = null,
         val useManagerPrereleases: Boolean? = null,
+        val defaultExperimentalAppVersions: Boolean? = null,
         val officialBundlePrerelease: Boolean? = null,
         val officialBundleExperimentalVersions: Boolean? = null,
         val bundlePrereleasesEnabled: Set<String>? = null,
@@ -416,6 +420,7 @@ class PreferencesManager(
                 keystorePassword = keystorePassword.takeIf { patching },
                 firstLaunch = firstLaunch.takeIf { home },
                 useManagerPrereleases = useManagerPrereleases.takeIf { updates },
+                defaultExperimentalAppVersions = defaultExperimentalAppVersions.takeIf { updates },
                 officialBundlePrerelease = officialBundlePrerelease.takeIf { sources },
                 officialBundleExperimentalVersions = officialBundleExperimentalVersions.takeIf { sources },
                 bundlePrereleasesEnabled = bundlePrereleasesEnabled.takeIf { sources },
@@ -476,6 +481,7 @@ class PreferencesManager(
         installerHiddenComponents = installerHiddenComponents.get(),
         firstLaunch = firstLaunch.get(),
         useManagerPrereleases = useManagerPrereleases.get(),
+        defaultExperimentalAppVersions = defaultExperimentalAppVersions.get(),
         // Custom sources carry prerelease/experimental toggles in customBundles, and the official
         // source (UID 0) gets readable booleans below - so raw UID sets are no longer exported
         officialBundlePrerelease = bundlePrereleasesEnabled.get().contains(DEFAULT_SOURCE_UID.toString()),
@@ -543,6 +549,7 @@ class PreferencesManager(
         snapshot.keystorePassword?.let { keystorePassword.value = it }
         snapshot.firstLaunch?.let { firstLaunch.value = it }
         snapshot.useManagerPrereleases?.let { useManagerPrereleases.value = it }
+        snapshot.defaultExperimentalAppVersions?.let { defaultExperimentalAppVersions.value = it }
         // Exports carry the official source's toggles as readable booleans; older ones only have
         // the UID sets, where the official source is the one UID that is stable across devices
         val officialUid = DEFAULT_SOURCE_UID.toString()

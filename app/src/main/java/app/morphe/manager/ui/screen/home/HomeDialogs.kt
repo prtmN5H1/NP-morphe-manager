@@ -35,6 +35,7 @@ import app.morphe.manager.domain.bundles.PatchBundleSource.Extensions.ownerAvata
 import app.morphe.manager.domain.bundles.PatchBundleSource.Extensions.sourceType
 import app.morphe.manager.domain.bundles.PatchBundleSource.Extensions.usesPrerelease
 import app.morphe.manager.domain.bundles.recommended
+import app.morphe.manager.domain.manager.PreferencesManager
 import app.morphe.manager.domain.repository.PatchBundleRepository
 import app.morphe.manager.domain.repository.PatchBundleRepository.LocalFileCheck
 import app.morphe.manager.domain.repository.SourceMuteRepository
@@ -568,6 +569,7 @@ private fun DialogHostScope.AddSourceConfirmDialog(
     details: (@Composable () -> Unit)?,
     offersChooseApps: Boolean,
     offersPrerelease: Boolean,
+    offersExperimentalVersions: Boolean = false,
     warns: Boolean,
     onConfirm: (NewSourceOptions) -> Unit,
     onDismiss: () -> Unit,
@@ -575,7 +577,11 @@ private fun DialogHostScope.AddSourceConfirmDialog(
     confirmIcon: ImageVector = MaterialSymbols.Rounded.Extension,
     confirmEnabled: Boolean = true
 ) {
-    var options by rememberSaveable { mutableStateOf(NewSourceOptions()) }
+    val preferences: PreferencesManager = koinInject()
+    val defaultExperimentalAppVersions by preferences.defaultExperimentalAppVersions.getAsState()
+    var options by rememberSaveable {
+        mutableStateOf(NewSourceOptions(useExperimentalVersions = defaultExperimentalAppVersions))
+    }
 
     AppDialog(
         onDismissRequest = onDismiss,
@@ -635,7 +641,8 @@ private fun DialogHostScope.AddSourceConfirmDialog(
                 options = options,
                 onOptionsChange = { options = it },
                 offersChooseApps = offersChooseApps,
-                offersPrerelease = offersPrerelease
+                offersPrerelease = offersPrerelease,
+                offersExperimentalVersions = offersExperimentalVersions
             )
 
             if (warns) {
@@ -811,6 +818,7 @@ fun DialogHostScope.DeepLinkAddSourceDialog(
         offersChooseApps = scope == SourceScope.Whole,
         // A source already added keeps the channel it is on
         offersPrerelease = !isAdded && endpoint != null && JsonPatchBundle.supportsPrerelease(endpoint),
+        offersExperimentalVersions = !isAdded,
         warns = !bringsAppBack,
         onConfirm = onConfirm,
         onDismiss = onDismiss

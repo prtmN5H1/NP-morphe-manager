@@ -127,8 +127,8 @@ fun SourcesPage(
             AddSourcePanel(
                 visible = state.isAddingSource,
                 onClose = state::closeAddSource,
-                onSubmit = { urls, options ->
-                    homeViewModel.addSources(urls, options)
+                onSubmit = { requests, options ->
+                    homeViewModel.addSources(requests, options)
                     state.closeAddSource()
                     onSourceAdded()
                 },
@@ -784,6 +784,21 @@ private fun List<PatchBundleSource>.sortedForSourceSort(
             .thenBy { it.sourceSortTitle() }
             .thenBy { it.uid }
     )
+
+    // Sources without an installed bundle (size 0) stay at the end in either direction.
+    SourceBundleSortMode.SIZE_ASC -> sortedWith(
+        compareBy<PatchBundleSource> { it.installedSizeBytes == 0L }
+            .thenBy { it.installedSizeBytes }
+            .thenBy { it.sourceSortTitle() }
+            .thenBy { it.uid }
+    )
+
+    SourceBundleSortMode.SIZE_DESC -> sortedWith(
+        compareBy<PatchBundleSource> { it.installedSizeBytes == 0L }
+            .thenByDescending { it.installedSizeBytes }
+            .thenBy { it.sourceSortTitle() }
+            .thenBy { it.uid }
+    )
 }
 
 private fun PatchBundleSource.sourceSortTitle(): String =
@@ -903,6 +918,7 @@ private fun BundleManagementCard(
     val share = stringResource(R.string.share)
     val copy = stringResource(R.string.copy)
     val copyToClipboard = rememberCopyToClipboard()
+    val context = LocalContext.current
     val patchesLabel = stringResource(R.string.patches)
     val selectLabel = stringResource(R.string.accessibility_select_source)
     val moveUpLabel = stringResource(R.string.accessibility_move_up)
@@ -1142,6 +1158,16 @@ private fun BundleManagementCard(
                                         copyText = bundle.version?.normalizeVersion()
                                     )
 
+                                    SettingsDivider()
+
+                                    InfoRow(
+                                        icon = MaterialSymbols.Rounded.Storage,
+                                        label = stringResource(R.string.sources_management_downloaded_size),
+                                        value = bundle.installedSizeBytes.takeIf { it > 0L }?.let {
+                                            android.text.format.Formatter.formatShortFileSize(context, it)
+                                        } ?: stringResource(R.string.sources_management_not_downloaded)
+                                    )
+
                                     bundle.signingKeyFingerprint?.let { fingerprint ->
                                         SettingsDivider()
 
@@ -1359,8 +1385,12 @@ private fun BundleCardHeader(
     // When showChevron=true (multiple bundles): show version • date.
     val timestamp = bundle.releasedAt
     val versionText = if (showChevron) bundle.version?.normalizeVersion() else null
-    val subtitle = remember(versionText, timestamp) {
-        listOfNotNull(versionText, timestamp?.let { getRelativeTimeString(it) }).joinToString(" • ")
+    val sizeText = bundle.installedSizeBytes.takeIf { it > 0L }?.let {
+        android.text.format.Formatter.formatShortFileSize(LocalContext.current, it)
+    }
+    val subtitle = remember(versionText, timestamp, sizeText) {
+        listOfNotNull(versionText, timestamp?.let { getRelativeTimeString(it) }, sizeText)
+            .joinToString(" • ")
     }
 
     Row(

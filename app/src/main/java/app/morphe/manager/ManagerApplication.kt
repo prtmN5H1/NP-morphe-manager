@@ -165,11 +165,10 @@ class ManagerApplication : Application() {
             // Patches FCM topic is determined by the default bundle (uid=0) prerelease toggle
             val usePatchesPrereleases = prefs.bundlePrereleasesEnabled.get().contains(DEFAULT_SOURCE_UID.toString())
 
-            // On GMS devices FCM is the primary delivery channel - WorkManager is not needed.
-            // Cancel any previously scheduled jobs on GMS devices
-            val hasGms = hasGooglePlayServices()
 
-            if (notificationsEnabled && !hasGms) {
+            // Manager updates are sourced only from this fork's GitHub Releases.
+            // WorkManager checks that repository on all devices; FCM is retained only for patch-bundle updates.
+            if (notificationsEnabled) {
                 UpdateCheckWorker.schedule(this@ManagerApplication, prefs.updateCheckInterval.get())
             } else {
                 UpdateCheckWorker.cancel(this@ManagerApplication)
