@@ -35,8 +35,6 @@ import app.morphe.manager.util.AppDataSource
 import app.morphe.manager.util.syncFcmTopics
 import app.morphe.manager.worker.UpdateCheckInterval
 import app.morphe.manager.worker.UpdateCheckWorker
-import com.google.android.gms.common.ConnectionResult
-import com.google.android.gms.common.GoogleApiAvailability
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -86,10 +84,6 @@ class SettingsViewModel(
 ) : ViewModel() {
     /** Whether this device can patch in the embedded JVM at all. */
     val jvmRuntimeAvailable = jvmInstallation.isAvailable
-
-    /** True when Google Play Services is available; FCM handles notifications on these devices. */
-    val hasGms: Boolean = GoogleApiAvailability.getInstance()
-        .isGooglePlayServicesAvailable(appContext) == ConnectionResult.SUCCESS
 
     /** True when POST_NOTIFICATIONS is granted (always true below Android 13). */
     fun hasNotificationPermission(): Boolean =
@@ -141,7 +135,7 @@ class SettingsViewModel(
                 useManagerPrereleases = useManagerPrereleases,
                 usePatchesPrereleases = patchesPrereleaseIds.contains(DEFAULT_SOURCE_UID.toString())
             )
-            if (newValue && !hasGms) UpdateCheckWorker.schedule(appContext, updateCheckInterval)
+            if (newValue) UpdateCheckWorker.schedule(appContext, updateCheckInterval)
             else UpdateCheckWorker.cancel(appContext)
         }
     }
@@ -162,7 +156,7 @@ class SettingsViewModel(
                 useManagerPrereleases = useManagerPrereleases,
                 usePatchesPrereleases = patchesPrereleaseIds.contains(DEFAULT_SOURCE_UID.toString())
             )
-            if (!hasGms) UpdateCheckWorker.schedule(appContext, updateCheckInterval)
+            UpdateCheckWorker.schedule(appContext, updateCheckInterval)
         } else {
             prefs.backgroundUpdateNotifications.update(false)
         }
@@ -176,7 +170,12 @@ class SettingsViewModel(
     /** Persists the selected update check interval and reschedules the worker on non-GMS devices. */
     fun selectUpdateInterval(interval: UpdateCheckInterval) = viewModelScope.launch {
         prefs.updateCheckInterval.update(interval)
-        if (!hasGms) UpdateCheckWorker.schedule(appContext, interval)
+        if (prefs.backgroundUpdateNotifications.get()) UpdateCheckWorker.schedule(appContext, interval)
+    }
+
+    /** Persists the default used when adding a source that supports experimental app versions. */
+    fun setDefaultExperimentalAppVersions(enabled: Boolean) = viewModelScope.launch {
+        prefs.defaultExperimentalAppVersions.update(enabled)
     }
 
     /** Persists the allow-metered-updates preference. */

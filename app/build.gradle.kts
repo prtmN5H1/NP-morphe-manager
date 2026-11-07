@@ -303,6 +303,7 @@ android {
             } else {
                 signingConfigs.create("release") {
                     storeFile = keystoreFile
+                    storeType = "JKS"
                     storePassword = System.getenv("KEYSTORE_PASSWORD")
                     keyAlias = System.getenv("KEYSTORE_ENTRY_ALIAS")
                     keyPassword = System.getenv("KEYSTORE_ENTRY_PASSWORD")

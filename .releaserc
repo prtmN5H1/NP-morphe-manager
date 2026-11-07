@@ -11,17 +11,21 @@
       "@semantic-release/commit-analyzer",
       {
         "releaseRules": [
-          { "type": "build", "scope": "Needs bump", "release": "patch" }
+          {
+            "type": "build",
+            "scope": "Needs bump",
+            "release": "patch"
+          }
         ]
       }
     ],
     "@semantic-release/release-notes-generator",
     [
-      "@MorpheApp/changelog", {
+      "@MorpheApp/changelog",
+      {
         "releaseJson": {
           "path": "app-release.json",
-          "downloadUrlTemplate": "https://github.com/${owner}/${repo}/releases/download/v${version}/morphe-manager-${version}.apk",
-          "signatureUrlTemplate": "https://github.com/${owner}/${repo}/releases/download/v${version}/morphe-manager-${version}.apk.asc"
+          "downloadUrlTemplate": "https://github.com/${owner}/${repo}/releases/download/v${version}/morphe-manager-${version}.apk"
         }
       }
     ],
@@ -48,17 +52,10 @@
       {
         "assets": [
           {
-            "path": "app/build/outputs/apk/release/*.apk?(.asc)"
+            "path": "app/build/outputs/apk/release/*.apk"
           }
         ],
         "successComment": false
-      }
-    ],
-    [
-      "@cleyrop-org/semantic-release-backmerge",
-      {
-        "backmergeBranches": [{"from": "main", "to": "dev"}],
-        "clearWorkspace": true
       }
     ]
   ]

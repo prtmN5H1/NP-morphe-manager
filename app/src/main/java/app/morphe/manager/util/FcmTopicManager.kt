@@ -11,14 +11,16 @@ import com.google.firebase.messaging.FirebaseMessaging
 /**
  * FCM topic strings used for update push notifications.
  *
- * Manager and patches topics are independent — each has a stable/dev pair:
+ * The custom manager intentionally does not subscribe to the official Morphe manager-update
+ * topics. Its own releases are checked against this fork's app-release.json by WorkManager.
+ * Only the built-in Morphe patches bundle keeps the original stable/dev FCM topics.
  *
  * | Topic            | Audience                                      |
  * |------------------|-----------------------------------------------|
- * | [MANAGER_STABLE] | Manager stable releases (`main` branch)       |
- * | [MANAGER_DEV]    | Manager prerelease builds (`dev` branch)      |
- * | [PATCHES_STABLE] | Patch bundle stable releases                  |
- * | [PATCHES_DEV]    | Patch bundle prerelease releases              |
+ * | [MANAGER_STABLE] | Retired official manager topic (always unsubscribed) |
+ * | [MANAGER_DEV]    | Retired official manager topic (always unsubscribed) |
+ * | [PATCHES_STABLE] | Built-in patch bundle stable releases         |
+ * | [PATCHES_DEV]    | Built-in patch bundle prerelease releases     |
  *
  * Stable topics are always subscribed when notifications are enabled —
  * a stable release (e.g. `1.5.0`) is always a valid upgrade from a dev
@@ -34,14 +36,9 @@ object FcmTopics {
 }
 
 /**
- * Synchronizes all four FCM topic subscriptions with the user's current preferences.
- *
- * | Parameter             | stable topic | dev topic    |
- * |-----------------------|--------------|--------------|
- * | useManagerPrereleases | ✓ always     | if true only |
- * | usePatchesPrereleases | ✓ always     | if true only |
- *
- * When [notificationsEnabled] is false, unsubscribes from all four topics.
+ * Synchronizes FCM subscriptions for patch-bundle updates only. Official manager topics are
+ * always unsubscribed because manager updates come exclusively from this fork's Release metadata.
+ * When [notificationsEnabled] is false, all four legacy topics are unsubscribed.
  *
  * Custom third-party bundles do not have FCM topics — only the built-in Morphe bundle does.
  * Safe to call multiple times — FCM deduplicates subscribe/unsubscribe internally.
@@ -65,12 +62,14 @@ fun syncFcmTopics(
         return
     }
 
-    // Stable topics: always subscribed when notifications are enabled
-    // Dev topics: only when user has explicitly enabled prereleases
-    messaging.syncTopic(FcmTopics.MANAGER_STABLE, subscribe = true)
-    messaging.syncTopic(FcmTopics.MANAGER_DEV,    subscribe = useManagerPrereleases)
+    // Never receive official manager releases on this custom fork. Unsubscribe explicitly so
+    // installs upgraded from an older build stop receiving the official manager topic messages.
+    messaging.syncTopic(FcmTopics.MANAGER_STABLE, subscribe = false)
+    messaging.syncTopic(FcmTopics.MANAGER_DEV, subscribe = false)
+
+    // Built-in Morphe patch-bundle notifications remain on their original channels.
     messaging.syncTopic(FcmTopics.PATCHES_STABLE, subscribe = true)
-    messaging.syncTopic(FcmTopics.PATCHES_DEV,    subscribe = usePatchesPrereleases)
+    messaging.syncTopic(FcmTopics.PATCHES_DEV, subscribe = usePatchesPrereleases)
 }
 
 /**

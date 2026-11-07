@@ -346,6 +346,12 @@ class MorpheAPI(
         config: RepoConfig,
         releaseInfo: ManagerReleaseInfo
     ): MorpheAsset {
+        // Never accept a stale upstream app-release.json that points at an official Morphe APK.
+        // This fork only installs Manager APKs published in its own GitHub Releases.
+        val expectedPrefix = "${config.htmlUrl}/releases/download/"
+        require(releaseInfo.downloadUrl.startsWith(expectedPrefix, ignoreCase = true)) {
+            "Manager update URL is outside this fork's releases: ${releaseInfo.downloadUrl}"
+        }
         val version = releaseInfo.version.withVersionPrefix()
         return MorpheAsset(
             downloadUrl = releaseInfo.downloadUrl,

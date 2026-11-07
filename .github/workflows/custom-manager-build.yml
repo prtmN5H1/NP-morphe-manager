@@ -17,7 +17,6 @@ on:
 
 permissions:
   contents: write
-  packages: read
 
 concurrency:
   group: custom-morphe-main-sync-build
@@ -26,17 +25,16 @@ concurrency:
 jobs:
   sync-upstream:
     name: Sync official Morphe main into custom main
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       changed: ${{ steps.sync.outputs.changed }}
     steps:
       - name: Check out custom fork with full history
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ github.token }}
-
+          token: ${{ secrets.GITHUB_TOKEN }}
       - name: Merge official upstream
         id: sync
         shell: bash
@@ -45,14 +43,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/MorpheApp/morphe-manager.git
-          git fetch --no-tags upstream +refs/heads/main:refs/remotes/upstream/main
-
+          git fetch upstream main
           if git merge-base --is-ancestor upstream/main HEAD; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "Custom branch already contains the latest official main."
             exit 0
           fi
-
           if git merge --no-edit upstream/main; then
             git push origin HEAD:main
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -66,36 +62,24 @@ jobs:
     name: Build Community Catalog APK
     needs: sync-upstream
     if: needs.sync-upstream.outputs.changed == 'true' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - name: Check out merged custom source
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
-
       - name: Set up Java
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
-
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
-        with:
-          # The legacy "tools" package was removed from Google's SDK repository.
-          # setup-android v4 defaults to platform-tools; keep it explicit here.
-          packages: 'platform-tools'
-
+        uses: android-actions/setup-android@v3
       - name: Build debug APK
-        env:
-          # The MorpheApp GitHub Maven registry requires authenticated package access.
-          # Prefer an optional PAT secret; otherwise use this repository's GITHUB_TOKEN.
-          GITHUB_TOKEN: ${{ secrets.MORPHE_GPR_TOKEN || secrets.GITHUB_TOKEN }}
         run: bash gradlew :app:assembleDebug --stacktrace
-
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: morphe-community-catalog-debug-${{ github.run_number }}
           path: app/build/outputs/apk/debug/*.apk

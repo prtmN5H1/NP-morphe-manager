@@ -74,7 +74,7 @@ class MorpheFcmService : FirebaseMessagingService() {
         Log.d(tag, "MorpheFcmService: message received, type=$type, topic=${message.from}")
 
         when (type) {
-            TYPE_MANAGER_UPDATE -> notificationManager.showManagerUpdateNotification(version)
+            TYPE_MANAGER_UPDATE -> Log.d(tag, "Ignoring official manager-update FCM; custom releases are polled from this fork")
             TYPE_BUNDLE_UPDATE  -> notificationManager.showBundleUpdateNotification(version)
             else -> Log.d(tag, "MorpheFcmService: unknown type '$type' - ignoring")
         }

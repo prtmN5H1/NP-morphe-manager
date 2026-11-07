@@ -26,6 +26,7 @@ fun UpdatesItems(
     val backgroundUpdateNotifications by prefs.backgroundUpdateNotifications.getAsState()
     val allowMeteredUpdates by prefs.allowMeteredUpdates.getAsState()
     val useManagerPrereleases by prefs.useManagerPrereleases.getAsState()
+    val defaultExperimentalAppVersions by prefs.defaultExperimentalAppVersions.getAsState()
     val usePatchesPrereleases by prefs.bundlePrereleasesEnabled.getAsState()
     val useExpertMode by prefs.useExpertMode.getAsState()
     val showPrereleaseWarning = remember { mutableStateOf(false) }
@@ -67,6 +68,15 @@ fun UpdatesItems(
         icon = MaterialSymbols.Rounded.Science,
         title = stringResource(R.string.settings_advanced_updates_manager_prereleases),
         subtitle = stringResource(R.string.settings_advanced_updates_manager_prereleases_description)
+    )
+
+    // Default for new sources: this is only applied when the source supports prerelease and experimental targets.
+    SettingsSwitchItem(
+        checked = defaultExperimentalAppVersions,
+        onToggle = { settingsViewModel.setDefaultExperimentalAppVersions(!defaultExperimentalAppVersions) },
+        icon = MaterialSymbols.Rounded.Science,
+        title = stringResource(R.string.settings_advanced_default_experimental_apps),
+        subtitle = stringResource(R.string.settings_advanced_default_experimental_apps_description)
     )
 
     // Allow updates on metered connections

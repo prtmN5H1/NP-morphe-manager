@@ -39,8 +39,6 @@ import app.morphe.manager.util.*
 import app.morphe.manager.worker.UpdateCheckWorker
 import coil.Coil
 import coil.ImageLoader
-import com.google.android.gms.common.ConnectionResult
-import com.google.android.gms.common.GoogleApiAvailability
 import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
@@ -175,12 +173,9 @@ class ManagerApplication : Application() {
             // Patches FCM topic is determined by the default bundle (uid=0) prerelease toggle
             val usePatchesPrereleases = prefs.bundlePrereleasesEnabled.get().contains(DEFAULT_SOURCE_UID.toString())
 
-            // On GMS devices FCM is the primary delivery channel - WorkManager is not needed.
-            // Cancel any previously scheduled jobs on GMS devices
-            val hasGms = GoogleApiAvailability.getInstance()
-                .isGooglePlayServicesAvailable(this@ManagerApplication) == ConnectionResult.SUCCESS
-
-            if (notificationsEnabled && !hasGms) {
+            // Manager updates are sourced only from this fork's GitHub Releases. WorkManager
+            // checks that repository on all devices; FCM is retained only for patch-bundle updates.
+            if (notificationsEnabled) {
                 UpdateCheckWorker.schedule(this@ManagerApplication, prefs.updateCheckInterval.get())
             } else {
                 UpdateCheckWorker.cancel(this@ManagerApplication)

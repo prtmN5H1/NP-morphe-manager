@@ -29,8 +29,7 @@ APK_DST="${RELEASE_DIR}/morphe-manager-${VERSION}.apk"
 mv "${APK_SRC}" "${APK_DST}"
 echo "Renamed APK to ${APK_DST}"
 
-# 4. GPG-sign the APK
-gpg --armor --detach-sign "${APK_DST}"
-echo "Signed ${APK_DST}"
+# Android APK signing is performed by Gradle using app/keystore.jks. No separate
+# Morphe-org GPG key is required for this independently maintained fork.
 
 echo "Release v${VERSION} prepared successfully."

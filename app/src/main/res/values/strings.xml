@@ -1,4 +1,4 @@
-﻿<resources>
+<resources>
     <!-- Home Screen -->
     <string name="home_other_apps">Other apps</string>
     <string name="home_other_apps_action">Select other apps</string>
@@ -183,6 +183,14 @@
     <string name="sources_sort_last_updated_description">Newest source updates first</string>
     <string name="sources_sort_enabled_first">Enabled first</string>
     <string name="sources_sort_enabled_first_description">Show active sources before disabled sources</string>
+    <string name="sources_sort_size_smallest">Smallest source first</string>
+    <string name="sources_sort_size_smallest_description">Sort by downloaded bundle size, smallest first</string>
+    <string name="sources_sort_size_largest">Largest source first</string>
+    <string name="sources_sort_size_largest_description">Sort by downloaded bundle size, largest first</string>
+    <string name="sources_management_downloaded_size">Downloaded size</string>
+    <string name="sources_management_not_downloaded">Not downloaded</string>
+    <string name="settings_advanced_default_experimental_apps">Experimental app versions by default</string>
+    <string name="settings_advanced_default_experimental_apps_description">Enable experimental app targets by default for new sources that provide them. You can still change each source individually.</string>
     <string name="sources_patches_source_disabled_hint">This source is disabled. Its patches are listed for reference and are not applied</string>
     <string name="sources_management_open_in_browser">Open in browser</string>
     <string name="sources_management_report_issue">Report an issue</string>
@@ -951,7 +959,7 @@ Patches are not affected: enable pre-release patches for each source in the patc
     <string name="settings_advanced_updates_allow_metered_description">Downloads Morphe and patch updates over mobile data</string>
     <string name="settings_advanced_updates_background_notifications">Background update notifications</string>
     <string name="settings_advanced_updates_background_notifications_description">Periodically check for updates in the background and notify when available</string>
-    <string name="settings_advanced_updates_background_notifications_description_fcm">Push notifications for new releases, even when the app is closed</string>
+    <string name="settings_advanced_updates_background_notifications_description_fcm">Notifications for your custom Manager releases and patch updates</string>
     <string name="settings_system_notifications_categories">Notification categories</string>
     <string name="settings_system_notifications_categories_description">Choose in system settings which updates notify you</string>
     <string name="settings_advanced_update_interval">Check frequency</string>
