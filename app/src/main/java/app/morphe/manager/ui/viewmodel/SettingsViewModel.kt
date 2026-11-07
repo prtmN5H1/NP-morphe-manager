@@ -16,7 +16,9 @@ import androidx.lifecycle.viewModelScope
 import app.morphe.manager.domain.installer.InstallerManager
 import app.morphe.manager.domain.installer.RootInstaller
 import app.morphe.manager.domain.installer.SessionInstaller
+import app.morphe.manager.domain.manager.AfterPatching
 import app.morphe.manager.domain.manager.PreferencesManager
+import app.morphe.manager.domain.manager.RootPatchMode
 import app.morphe.manager.domain.repository.PatchBundleRepository
 import app.morphe.manager.domain.repository.PatchBundleRepository.Companion.DEFAULT_SOURCE_UID
 import app.morphe.manager.domain.repository.PatchOptionsRepository
@@ -25,13 +27,14 @@ import app.morphe.manager.domain.repository.SelectionSetRepository
 import app.morphe.manager.domain.repository.SelectionSetSummary
 import app.morphe.manager.domain.repository.SourceMuteRepository
 import app.morphe.manager.patcher.runtime.jvm.JvmInstallation
-import app.morphe.manager.network.api.MorpheAPI
+import app.morphe.manager.network.api.ReleaseAPI
 import app.morphe.manager.patcher.patch.PatchInfo
 import app.morphe.manager.ui.screen.settings.system.CopyTarget
 import app.morphe.manager.ui.screen.shared.CopySelectionCandidate
 import app.morphe.manager.util.ApkDownloadHelperContract
 import app.morphe.manager.util.AppDataResolver
 import app.morphe.manager.util.AppDataSource
+import app.morphe.manager.util.hasGooglePlayServices
 import app.morphe.manager.util.syncFcmTopics
 import app.morphe.manager.worker.UpdateCheckInterval
 import app.morphe.manager.worker.UpdateCheckWorker
@@ -76,7 +79,7 @@ class SettingsViewModel(
     private val optionsRepository: PatchOptionsRepository,
     private val patchBundleRepository: PatchBundleRepository,
     private val appDataResolver: AppDataResolver,
-    private val api: MorpheAPI,
+    private val api: ReleaseAPI,
     private val appContext: Context,
     jvmInstallation: JvmInstallation,
     /** State behind the copy panel, see [openCopy], and behind renaming and deleting sets. */
@@ -84,6 +87,9 @@ class SettingsViewModel(
 ) : ViewModel() {
     /** Whether this device can patch in the embedded JVM at all. */
     val jvmRuntimeAvailable = jvmInstallation.isAvailable
+
+    /** True when Google Play Services is available; FCM handles notifications on these devices. */
+    val hasGms: Boolean = appContext.hasGooglePlayServices()
 
     /** True when POST_NOTIFICATIONS is granted (always true below Android 13). */
     fun hasNotificationPermission(): Boolean =
@@ -225,19 +231,8 @@ class SettingsViewModel(
         prefs.includeGitHubPatInExports.update(includeInExport)
     }
 
-    // Asking how to install and installing on its own exclude each other, so turning one on turns the other off
-
-    // Without root the installer prompt comes after patching and waits for the user there, so it
-    // excludes installing on its own. With root, it is answered before patching, and they go together
-
-    fun setPromptInstallerOnInstall(enabled: Boolean) = viewModelScope.launch {
-        prefs.promptInstallerOnInstall.update(enabled)
-        if (enabled && !isDeviceRooted()) prefs.autoInstallAfterPatching.update(false)
-    }
-
-    fun setAutoInstallAfterPatching(enabled: Boolean) = viewModelScope.launch {
-        prefs.autoInstallAfterPatching.update(enabled)
-        if (enabled && !isDeviceRooted()) prefs.promptInstallerOnInstall.update(false)
+    fun setAfterPatching(action: AfterPatching) = viewModelScope.launch {
+        prefs.afterPatching.update(action)
     }
 
     fun setNoMountOnly(enabled: Boolean) = viewModelScope.launch {
@@ -301,19 +296,18 @@ class SettingsViewModel(
         prefs.patcherErrorSoundUri.update(uri)
     }
 
-    /**
-     * Requests root access when the AutoSaved (root-mount) installer is chosen,
-     * then persists the selection.
-     */
+    /** Asks for root access when [token] installs with root, then saves it. */
     fun confirmInstallerSelection(token: InstallerManager.Token) =
         viewModelScope.launch(Dispatchers.IO) {
-            if (token == InstallerManager.Token.AutoSaved ||
-                token == InstallerManager.Token.RootPlayStore
-            ) {
-                runCatching { rootInstaller.hasRootAccess() }
-            }
+            if (token.usesRoot) runCatching { rootInstaller.hasRootAccess() }
             installerManager.updatePrimaryToken(token)
         }
+
+    /** Asks for root access when [mode] can mount, then saves it. */
+    fun setRootPatchMode(mode: RootPatchMode) = viewModelScope.launch(Dispatchers.IO) {
+        if (mode != RootPatchMode.STANDARD) runCatching { rootInstaller.hasRootAccess() }
+        prefs.rootPatchMode.update(mode)
+    }
 
     /**
      * Returns a deduplicated, validated list of installer entries for [installTarget],
