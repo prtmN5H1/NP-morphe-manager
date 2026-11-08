@@ -164,6 +164,8 @@
     <string name="sources_sort_manual_hint">Long-press a source to reorder</string>
     <string name="sources_sort_last_updated">Last updated</string>
     <string name="sources_sort_enabled_first">Enabled first</string>
+    <string name="sources_sort_size_smallest">Smallest source first</string>
+    <string name="sources_sort_size_largest">Largest source first</string>
     <string name="sources_patches_source_disabled_hint">This source is disabled. Its patches are listed for reference and are not applied</string>
     <string name="sources_management_open_in_browser">Open in browser</string>
     <string name="sources_management_report_issue">Report an issue</string>

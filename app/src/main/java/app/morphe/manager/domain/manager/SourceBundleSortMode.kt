@@ -16,7 +16,9 @@ enum class SourceBundleSortMode(
     LAST_UPDATED(R.string.sources_sort_last_updated),
     NAME_ASC(R.string.file_picker_sort_name_asc),
     NAME_DESC(R.string.file_picker_sort_name_desc),
-    ENABLED_FIRST(R.string.sources_sort_enabled_first);
+    ENABLED_FIRST(R.string.sources_sort_enabled_first),
+    SIZE_SMALLEST(R.string.sources_sort_size_smallest),
+    SIZE_LARGEST(R.string.sources_sort_size_largest);
 
     companion object {
         fun fromPreference(value: String?): SourceBundleSortMode =

@@ -224,12 +224,14 @@ private fun SourcesPageContent(
     // Set when the user flips pre-releases on, from a card or a selection: the switch waits for
     // confirmation first, so the meaning of unstable testing builds is explained before anything changes
     val bundlesToConfirmPrerelease = remember { mutableStateOf<List<PatchBundleSource>>(emptyList()) }
-    // Search, sorting and filtering are offered from two sources up
+    // Search needs multiple sources to be useful, but sorting and filtering should
+    // remain available even when the user has only one source.
     val isSearchable = sources.size >= 2
+    val hasListOptions = sources.isNotEmpty()
     val search = rememberSearchFieldState(searchable = isSearchable)
     var sourceFilter by rememberSaveable { mutableStateOf(SourceFilterMode.ALL) }
-    LaunchedEffect(isSearchable) {
-        if (!isSearchable) {
+    LaunchedEffect(hasListOptions) {
+        if (!hasListOptions) {
             state.isListOptionsOpen = false
             sourceFilter = SourceFilterMode.ALL
         }
@@ -432,7 +434,7 @@ private fun SourcesPageContent(
                     ReorderHeaderActions(reorder)
                     return@PageHeader
                 }
-                AnimatedVisibility(visible = isSearchable) {
+                AnimatedVisibility(visible = hasListOptions) {
                     ListOptionsButton(
                         sortRes = sourceSortMode.labelRes,
                         filterRes = sourceFilter.labelRes.takeIf { sourceFilter.isActive },
@@ -781,6 +783,20 @@ private fun List<PatchBundleSource>.sortedForSourceSort(
 
     SourceBundleSortMode.ENABLED_FIRST -> sortedWith(
         compareByDescending<PatchBundleSource> { it.enabled }
+            .thenBy { it.sourceSortTitle() }
+            .thenBy { it.uid }
+    )
+
+    SourceBundleSortMode.SIZE_SMALLEST -> sortedWith(
+        compareBy<PatchBundleSource> { if (it.patchesJarFile.exists()) 0 else 1 }
+            .thenBy { if (it.patchesJarFile.exists()) it.patchesJarFile.length() else Long.MAX_VALUE }
+            .thenBy { it.sourceSortTitle() }
+            .thenBy { it.uid }
+    )
+
+    SourceBundleSortMode.SIZE_LARGEST -> sortedWith(
+        compareBy<PatchBundleSource> { if (it.patchesJarFile.exists()) 0 else 1 }
+            .thenByDescending { if (it.patchesJarFile.exists()) it.patchesJarFile.length() else 0L }
             .thenBy { it.sourceSortTitle() }
             .thenBy { it.uid }
     )
