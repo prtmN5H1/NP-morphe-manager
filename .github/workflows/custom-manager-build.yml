@@ -1,10 +1,9 @@
-name: Custom Morphe Manager - upstream sync and APK build
+name: Custom Morphe Manager - upstream sync, build and release
 
 on:
-  workflow_dispatch:
   schedule:
-    # Check the official stable branch every day at 03:00 UTC.
-    - cron: '0 3 * * *'
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
@@ -17,6 +16,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
   packages: read
 
 concurrency:
@@ -30,14 +30,14 @@ jobs:
     outputs:
       changed: ${{ steps.sync.outputs.changed }}
     steps:
-      - name: Check out custom fork with full history
+      - name: Check out custom main with full history
         uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
           token: ${{ github.token }}
 
-      - name: Merge official upstream
+      - name: Merge latest official Morphe main
         id: sync
         shell: bash
         run: |
@@ -46,58 +46,53 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/MorpheApp/morphe-manager.git
           git fetch --no-tags upstream +refs/heads/main:refs/remotes/upstream/main
-
           if git merge-base --is-ancestor upstream/main HEAD; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "Custom branch already contains the latest official main."
+            echo "Custom main already contains official upstream main."
             exit 0
           fi
-
           if git merge --no-edit upstream/main; then
             git push origin HEAD:main
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             git merge --abort || true
-            echo "::error::Upstream changes conflict with custom changes. No files were pushed and no APK will be published. Resolve the conflict in the custom fork, then rerun this workflow."
+            echo "::error::Upstream changes conflict with custom changes. Nothing was pushed or released. Resolve the conflict, then rerun this workflow."
             exit 1
           fi
 
-  build-apk:
-    name: Build Community Catalog APK
+  build-custom-apk:
+    name: Build merged custom APK
     needs: sync-upstream
     if: needs.sync-upstream.outputs.changed == 'true' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: ubuntu-24.04
     steps:
-      - name: Check out merged custom source
+      - name: Check out merged custom main
         uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
-
       - name: Set up Java
         uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
-
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          # The legacy "tools" package was removed from Google's SDK repository.
-          # setup-android v4 defaults to platform-tools; keep it explicit here.
           packages: 'platform-tools'
-
       - name: Build debug APK
         env:
-          # The MorpheApp GitHub Maven registry requires authenticated package access.
-          # Prefer an optional PAT secret; otherwise use this repository's GITHUB_TOKEN.
           GITHUB_TOKEN: ${{ secrets.MORPHE_GPR_TOKEN || secrets.GITHUB_TOKEN }}
         run: bash gradlew :app:assembleDebug --stacktrace
-
-      - name: Upload APK artifact
+      - name: Upload debug APK
         uses: actions/upload-artifact@v7
         with:
-          name: morphe-community-catalog-debug-${{ github.run_number }}
+          name: morphe-custom-debug-${{ github.run_number }}
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 30
+      - name: Start signed semantic release after upstream update
+        if: needs.sync-upstream.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release.yml --ref main
