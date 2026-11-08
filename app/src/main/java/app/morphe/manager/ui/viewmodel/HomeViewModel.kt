@@ -256,16 +256,37 @@ class HomeViewModel(
      * of its own and another version of a local source into it, as its update action would. Files
      * already added are left out. Each new source starts with [options], see [onSourcesAdded].
      */
-    fun addSources(urls: List<String>, options: NewSourceOptions) = viewModelScope.launch {
+    fun addSources(requests: List<SourceAddRequest>, options: NewSourceOptions) = viewModelScope.launch {
         val imports = pickedBundleImports.mapNotNull { importOf(it.uri, it.check) }
         pickedBundles = emptyList()
-        val added = withContext(NonCancellable) {
-            val remote = if (urls.isEmpty()) emptyList() else {
-                patchBundleRepository.createRemotes(urls, usePrerelease = options.usePrerelease)
+        withContext(NonCancellable) {
+            // Requests may include whole-source, app-scoped, or universal-only links. Group equal
+            // scopes so the repository can retain Morphe's native kept-apps behavior for each one.
+            val groups = requests.distinctBy { it.url.lowercase(Locale.ROOT) }
+                .groupBy { it.scope }
+            groups.forEach { (scope, scopedRequests) ->
+                val newRequests = if (scope is SourceScope.App) {
+                    scopedRequests.filter { request ->
+                        val existingUid = patchBundleRepository.existingSourceUid(request.url)
+                        if (existingUid != null) {
+                            sourceMuteRepository.unmuteApps(existingUid, listOf(scope.packageName))
+                            false
+                        } else true
+                    }
+                } else scopedRequests
+                val added = if (newRequests.isEmpty()) emptyList() else patchBundleRepository.createRemotes(
+                    urls = newRequests.map { it.url },
+                    keptApps = scope.keptApps,
+                    usePrerelease = options.usePrerelease
+                )
+                if (added.isNotEmpty() && options.useExperimentalVersions) {
+                    patchBundleRepository.setUseExperimentalVersions(added.toSet(), true)
+                }
+                onSourcesAdded(added, options, scope)
             }
-            remote + importLocalFiles(imports)
+            val local = importLocalFiles(imports)
+            onSourcesAdded(local, options)
         }
-        onSourcesAdded(added, options)
     }
 
     /** Local source waiting for a replacement file, so the picker result knows what it updates. */
@@ -505,7 +526,11 @@ class HomeViewModel(
         scope: SourceScope
     ) = viewModelScope.launch {
         val added = withContext(NonCancellable) {
-            patchBundleRepository.createRemotes(urls, keptApps = scope.keptApps, usePrerelease = options.usePrerelease)
+            patchBundleRepository.createRemotes(urls, keptApps = scope.keptApps, usePrerelease = options.usePrerelease).also { uids ->
+                if (uids.isNotEmpty() && options.useExperimentalVersions) {
+                    patchBundleRepository.setUseExperimentalVersions(uids.toSet(), true)
+                }
+            }
         }
         onSourcesAdded(added, options, scope)
     }

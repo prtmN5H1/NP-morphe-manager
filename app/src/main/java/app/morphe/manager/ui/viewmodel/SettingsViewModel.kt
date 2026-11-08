@@ -141,7 +141,7 @@ class SettingsViewModel(
                 useManagerPrereleases = useManagerPrereleases,
                 usePatchesPrereleases = patchesPrereleaseIds.contains(DEFAULT_SOURCE_UID.toString())
             )
-            if (newValue && !hasGms) UpdateCheckWorker.schedule(appContext, updateCheckInterval)
+            if (newValue) UpdateCheckWorker.schedule(appContext, updateCheckInterval)
             else UpdateCheckWorker.cancel(appContext)
         }
     }
@@ -162,7 +162,7 @@ class SettingsViewModel(
                 useManagerPrereleases = useManagerPrereleases,
                 usePatchesPrereleases = patchesPrereleaseIds.contains(DEFAULT_SOURCE_UID.toString())
             )
-            if (!hasGms) UpdateCheckWorker.schedule(appContext, updateCheckInterval)
+            UpdateCheckWorker.schedule(appContext, updateCheckInterval)
         } else {
             prefs.backgroundUpdateNotifications.update(false)
         }
@@ -176,7 +176,12 @@ class SettingsViewModel(
     /** Persists the selected update check interval and reschedules the worker on non-GMS devices. */
     fun selectUpdateInterval(interval: UpdateCheckInterval) = viewModelScope.launch {
         prefs.updateCheckInterval.update(interval)
-        if (!hasGms) UpdateCheckWorker.schedule(appContext, interval)
+        if (prefs.backgroundUpdateNotifications.get()) UpdateCheckWorker.schedule(appContext, interval)
+    }
+
+    /** Persists the default used when adding a source that supports experimental app versions. */
+    fun setDefaultExperimentalAppVersions(enabled: Boolean) = viewModelScope.launch {
+        prefs.defaultExperimentalAppVersions.update(enabled)
     }
 
     /** Persists the allow-metered-updates preference. */

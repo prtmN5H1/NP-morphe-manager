@@ -12,6 +12,14 @@ read_field() {
 # The manager polls app-release.json to decide whether an update exists, so the file must not
 # reach the branch until the APK it points at can actually be downloaded. semantic-release
 # builds the file during prepare, this step publishes it once the release assets are live.
+# This fork uses Android APK signing; remove any legacy Morphe GPG signature URL from the manifest.
+node - <<'NODE'
+const fs = require('fs');
+const file = 'app-release.json';
+const json = JSON.parse(fs.readFileSync(file, 'utf8'));
+delete json.signature_download_url;
+fs.writeFileSync(file, JSON.stringify(json, null, 2) + '\n');
+NODE
 JSON_VERSION=$(read_field version)
 
 # The file is carried in the working tree between phases, so refuse to publish anything that
@@ -22,10 +30,7 @@ if [ "${JSON_VERSION}" != "${VERSION}" ]; then
 fi
 
 DOWNLOAD_URL=$(read_field download_url)
-SIGNATURE_URL=$(read_field signature_download_url)
-
 APK_ATTEMPTS=30
-SIGNATURE_ATTEMPTS=6
 RETRY_DELAY=10
 
 wait_for_asset() {
@@ -49,11 +54,6 @@ wait_for_asset() {
 }
 
 wait_for_asset "${DOWNLOAD_URL}" "${APK_ATTEMPTS}"
-
-# The signature uploads alongside the APK, so it needs a far shorter budget of its own
-if [ -n "${SIGNATURE_URL}" ]; then
-  wait_for_asset "${SIGNATURE_URL}" "${SIGNATURE_ATTEMPTS}"
-fi
 
 git config user.name "${GIT_AUTHOR_NAME:-github-actions[bot]}"
 git config user.email "${GIT_AUTHOR_EMAIL:-41898282+github-actions[bot]@users.noreply.github.com}"

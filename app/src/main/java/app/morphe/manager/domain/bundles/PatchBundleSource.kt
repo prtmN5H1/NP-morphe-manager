@@ -42,6 +42,9 @@ sealed class PatchBundleSource(
 ) {
     protected val patchesFile = directory.resolve("patches.jar")
     internal val patchesJarFile: File get() = patchesFile
+    /** Actual on-disk size of the downloaded/installed bundle; zero until a bundle is present. */
+    val installedSizeBytes: Long
+        get() = patchesFile.takeIf { it.isFile }?.length()?.takeIf { it > 0L } ?: 0L
     private val signingKeyFile = directory.resolve(SIGNING_KEY_FILE_NAME)
 
     /**

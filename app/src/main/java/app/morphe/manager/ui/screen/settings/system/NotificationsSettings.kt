@@ -170,23 +170,16 @@ fun NotificationsSettings(settingsViewModel: SettingsViewModel = koinViewModel()
                     },
                     icon = MaterialSymbols.Rounded.Notifications_active,
                     title = stringResource(R.string.settings_advanced_updates_background_notifications),
-                    subtitle = stringResource(
-                        if (settingsViewModel.hasGms)
-                            R.string.settings_advanced_updates_background_notifications_description_fcm
-                        else
-                            R.string.settings_advanced_updates_background_notifications_description
-                    )
+                    subtitle = stringResource(R.string.settings_advanced_updates_background_notifications_description)
                 )
 
                 FoldingVisibility(visible = backgroundUpdateNotifications) {
                     Column {
-                        // FCM pushes updates as they land, so the polling interval only matters without GMS
-                        if (!settingsViewModel.hasGms) {
-                            UpdateIntervalSetting(
-                                selected = updateCheckInterval,
-                                onSelect = settingsViewModel::selectUpdateInterval
-                            )
-                        }
+                        // This fork polls its own GitHub Releases for manager updates on all devices.
+                        UpdateIntervalSetting(
+                            selected = updateCheckInterval,
+                            onSelect = settingsViewModel::selectUpdateInterval
+                        )
 
                         // Manager and patch updates have channels of their own, tuned where Android keeps them
                         SettingsItem(
@@ -201,8 +194,8 @@ fun NotificationsSettings(settingsViewModel: SettingsViewModel = koinViewModel()
                 }
             }
 
-            // Polling is what a vendor's battery saver cuts short, which pushed updates are spared
-            FoldingVisibility(visible = backgroundUpdateNotifications && !settingsViewModel.hasGms) {
+            // Polling is what a vendor's battery saver cuts short.
+            FoldingVisibility(visible = backgroundUpdateNotifications) {
                 SettingsFooter(
                     text = stringResource(R.string.settings_advanced_update_interval_battery_warning),
                     tone = SemanticTone.Warning

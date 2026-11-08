@@ -15,5 +15,7 @@ import kotlinx.parcelize.Parcelize
 @Parcelize
 data class NewSourceOptions(
     val chooseApps: Boolean = false,
-    val usePrerelease: Boolean = false
+    val usePrerelease: Boolean = false,
+    /** Apply the user's experimental app-version choice to newly added prerelease sources. */
+    val useExperimentalVersions: Boolean = false
 ) : Parcelable

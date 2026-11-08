@@ -15,7 +15,12 @@ import kotlin.time.Duration.Companion.minutes
 const val tag = "Morphe Manager"
 
 const val SOURCE_NAME = "Morphe Patches"
-const val MANAGER_REPO_URL = "https://github.com/MorpheApp/morphe-manager"
+/** The custom manager's own repository. All self-update metadata and releases come from here. */
+const val CUSTOM_MANAGER_REPO_URL = "https://github.com/prtmN5H1/NP-morphe-manager"
+const val CUSTOM_MANAGER_RELEASES_URL = "$CUSTOM_MANAGER_REPO_URL/releases"
+const val MANAGER_REPO_URL = CUSTOM_MANAGER_REPO_URL
+/** Original project, retained for attribution in About. */
+const val ORIGINAL_MANAGER_REPO_URL = "https://github.com/MorpheApp/morphe-manager"
 const val SOURCE_REPO_URL = "https://github.com/MorpheApp/morphe-patches"
 
 /** Key the releases of [SOURCE_REPO_URL] are signed with, see PatchBundleSignature. */
@@ -34,11 +39,11 @@ const val ADD_SOURCE_PATH = "/add-source"
 /** What a source link looks like, shown in a field waiting for one. */
 const val REMOTE_URL_PLACEHOLDER = "github.com/owner/repo"
 
-/** Raw GitHub URL for the stable manager release JSON (main branch) */
-const val MANAGER_RELEASE_JSON_URL = "https://raw.githubusercontent.com/MorpheApp/morphe-manager/refs/heads/main/app-release.json"
+/** Raw GitHub URL for this fork's stable manager release metadata (main branch). */
+const val MANAGER_RELEASE_JSON_URL = "https://raw.githubusercontent.com/prtmN5H1/NP-morphe-manager/refs/heads/main/app-release.json"
 
-/** Raw GitHub URL for the pre-release manager release JSON (dev branch) */
-const val MANAGER_PRERELEASE_JSON_URL = "https://raw.githubusercontent.com/MorpheApp/morphe-manager/refs/heads/dev/app-release.json"
+/** Raw GitHub URL for this fork's pre-release manager metadata (dev branch). */
+const val MANAGER_PRERELEASE_JSON_URL = "https://raw.githubusercontent.com/prtmN5H1/NP-morphe-manager/refs/heads/dev/app-release.json"
 
 /** Controls whether manager updates are fetched directly from JSON files in the repository instead of using the GitHub API */
 const val USE_MANAGER_DIRECT_JSON = true
