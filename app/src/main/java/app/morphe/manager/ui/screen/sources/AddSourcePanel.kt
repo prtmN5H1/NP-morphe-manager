@@ -140,6 +140,7 @@ fun AddSourcePanel(
                 }
                 CommunityCatalogWebView(
                     onAddSource = { url -> remote.addCommunitySource(url) },
+                    onRemoveSource = { url -> remote.removeCommunitySource(url) },
                     isSourceAdded = { url ->
                         when (val check = onCheckUrl(url)) {
                             is RemoteUrlCheck.Rejected -> check.reason == RemoteSourceRejection.Duplicate
@@ -389,18 +390,29 @@ private class RemoteLinksState(
     }
 
     /** Adds a repository selected from the embedded community catalogue to the normal pending list. */
-    fun addCommunitySource(addSourceUrl: String): Boolean {
+    private fun communityRepositoryUrl(addSourceUrl: String): String? {
         val normalizedLink = if (addSourceUrl.startsWith("intent://")) {
             "https://" + addSourceUrl.removePrefix("intent://").substringBefore("#Intent;")
         } else addSourceUrl
-        val uri = runCatching { Uri.parse(normalizedLink) }.getOrNull() ?: return false
-        if (!uri.host.equals("morphe.software", ignoreCase = true) || uri.path != "/add-source") return false
-        val repo = uri.getQueryParameter("github")?.let { "https://github.com/$it" }
+        val uri = runCatching { Uri.parse(normalizedLink) }.getOrNull() ?: return null
+        if (!uri.host.equals("morphe.software", ignoreCase = true) || uri.path != "/add-source") return null
+        return uri.getQueryParameter("github")?.let { "https://github.com/$it" }
             ?: uri.getQueryParameter("gitlab")?.let { "https://gitlab.com/$it" }
-            ?: return false
-        // Do not queue an already-added, blocked, or malformed source from the catalogue.
+    }
+
+    fun addCommunitySource(addSourceUrl: String): Boolean {
+        val repo = communityRepositoryUrl(addSourceUrl) ?: return false
         if (check(repo) !is RemoteUrlCheck.Accepted) return false
         return add(listOf(repo))
+    }
+
+    /** Tapping a queued catalogue card again removes it from the pending batch. */
+    fun removeCommunitySource(addSourceUrl: String): Boolean {
+        val repo = communityRepositoryUrl(addSourceUrl) ?: return false
+        val key = RemoteLinkEntry(repo, check(repo)).key
+        val queuedLink = entries.firstOrNull { it.key == key }?.link ?: return false
+        remove(queuedLink)
+        return true
     }
 
     private fun add(newLinks: List<String>): Boolean {
@@ -640,12 +652,14 @@ private fun PendingSourceRow(
 @Composable
 private fun CommunityCatalogWebView(
     onAddSource: (String) -> Boolean,
+    onRemoveSource: (String) -> Boolean,
     isSourceAdded: (String) -> Boolean,
     isSourceQueued: (String) -> Boolean,
     onWebViewCreated: (WebView) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val currentAdd by rememberUpdatedState(onAddSource)
+    val currentRemove by rememberUpdatedState(onRemoveSource)
     val currentIsAdded by rememberUpdatedState(isSourceAdded)
     val currentIsQueued by rememberUpdatedState(isSourceQueued)
     val currentOnWebViewCreated by rememberUpdatedState(onWebViewCreated)
@@ -697,6 +711,17 @@ private fun CommunityCatalogWebView(
                         runCatching { latch.await(2, java.util.concurrent.TimeUnit.SECONDS) }
                         return accepted
                     }
+                    @JavascriptInterface
+                    fun removeSource(url: String): Boolean {
+                        var removed = false
+                        val latch = java.util.concurrent.CountDownLatch(1)
+                        catalogWebView.post {
+                            removed = runCatching { currentRemove(url) }.getOrDefault(false)
+                            latch.countDown()
+                        }
+                        runCatching { latch.await(2, java.util.concurrent.TimeUnit.SECONDS) }
+                        return removed
+                    }
                 }, "MorpheCatalog")
 
                 webViewClient = object : WebViewClient() {
@@ -712,9 +737,9 @@ private fun CommunityCatalogWebView(
                             currentAdd(url)
                             return true
                         }
-                        val host = runCatching { Uri.parse(url).host?.lowercase(Locale.US) }.getOrNull()
-                        // All catalogue pages and their future routes stay inside this WebView.
-                        return host !in setOf("morphe-patches.software", "www.morphe-patches.software")
+                        // Keep the full website navigation available inside this WebView.
+                        // Only the native add-source deep link is intercepted above.
+                        return false
                     }
 
                     override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean =
@@ -776,33 +801,42 @@ private fun CommunityCatalogWebView(
                                     a.style.opacity = '0.65';
                                     a.setAttribute('aria-disabled', 'true');
                                     a.dataset.morpheStatus = 'added';
-                                  } else if (status === 'queued') {
-                                    setLabel(a, 'Queued ✓');
-                                    a.style.pointerEvents = 'none';
-                                    a.style.opacity = '0.85';
-                                    a.setAttribute('aria-disabled', 'true');
-                                    a.dataset.morpheStatus = 'queued';
                                   } else {
-                                    if (a.dataset.morpheStatus === 'queued' || a.dataset.morpheStatus === 'added') {
+                                    if (status === 'queued') {
+                                      setLabel(a, 'Queued ✓ · Tap to remove');
+                                      a.style.opacity = '0.85';
+                                      a.dataset.morpheStatus = 'queued';
+                                    } else {
                                       setLabel(a, a.dataset.morpheOriginalText || 'Add');
-                                      a.style.pointerEvents = '';
                                       a.style.opacity = '';
-                                      a.removeAttribute('aria-disabled');
                                       delete a.dataset.morpheStatus;
                                     }
+                                    a.style.pointerEvents = '';
+                                    a.removeAttribute('aria-disabled');
                                     if (!a.dataset.morpheClickBound) {
                                       a.dataset.morpheClickBound = '1';
                                       a.addEventListener('click', function(ev) {
                                         ev.preventDefault(); ev.stopPropagation();
+                                        var wasQueued = statusCache[src] === 'queued';
                                         var ok = false;
-                                        try { ok = MorpheCatalog.addSource(a.href); } catch(e) {}
+                                        try {
+                                          ok = wasQueued
+                                            ? MorpheCatalog.removeSource(a.href)
+                                            : MorpheCatalog.addSource(a.href);
+                                        } catch(e) {}
                                         if (ok) {
-                                          statusCache[src] = 'queued';
-                                          setLabel(a, 'Queued ✓');
-                                          a.style.pointerEvents = 'none';
-                                          a.style.opacity = '0.85';
-                                          a.setAttribute('aria-disabled', 'true');
-                                          a.dataset.morpheStatus = 'queued';
+                                          statusCache[src] = wasQueued ? 'new' : 'queued';
+                                          if (wasQueued) {
+                                            setLabel(a, a.dataset.morpheOriginalText || 'Add');
+                                            a.style.opacity = '';
+                                            delete a.dataset.morpheStatus;
+                                          } else {
+                                            setLabel(a, 'Queued ✓ · Tap to remove');
+                                            a.style.opacity = '0.85';
+                                            a.dataset.morpheStatus = 'queued';
+                                          }
+                                          a.style.pointerEvents = '';
+                                          a.removeAttribute('aria-disabled');
                                         }
                                       }, true);
                                     }

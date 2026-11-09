@@ -1486,6 +1486,17 @@ private fun BundleCardHeader(
                         onClick = onShowPatchMatches
                     )
                 }
+                // Report the actual downloaded patch bundle size, not the repository's
+                // advertised release size. Missing bundles are called out explicitly.
+                val downloadedBundleSize = bundle.patchesJarFile.takeIf { it.isFile }?.length()
+                val context = LocalContext.current
+                val sizeLabel = downloadedBundleSize?.let(context::formatBytes)
+                    ?: stringResource(R.string.sources_management_not_downloaded)
+                StatusBadge(
+                    text = sizeLabel,
+                    containerColor = cardStyle.chipContainerColor,
+                    contentColor = cardStyle.chipContentColor
+                )
             }
         }
 
